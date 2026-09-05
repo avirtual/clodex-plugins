@@ -47,6 +47,31 @@ Delegate the reading to `clodex-plugin-builder:api-scout` rather than pulling
 the whole contract into your own context. Ask it for the specific sections your
 plugin needs; it returns the rules and the signatures, not the prose.
 
+`plugin-api.md` is ~2,000 lines and sectioned. **Do not read it end to end** —
+send the scout to the section:
+
+| Building | Section |
+|---|---|
+| Deciding whether this should be a plugin at all | `what-plugins-can-do.md`, whole — it is short |
+| The manifest, and why one gets refused | §2 |
+| Per-seat visibility, `scope`, capability grants | §2.1 |
+| The engine `host` object | §4 |
+| Session hooks, the turn-text feed | §4 (`sessions`) |
+| Any UI at all — seven slots, one subsection each | §6 |
+| A button plus an overlay plus reading files | §6.3, §6.7, §8 |
+| An `[agent:…]` verb | §7, then `host.intents` in §4 |
+| Talking between your halves | §8 (`invoke`) |
+| Engine → renderer events | §9 |
+| Enable, disable, failure, quarantine | §10 |
+| **What you may not reach** | §13 — read before designing, not after |
+| Known gaps and unspecified behaviour | §14 |
+
+Three shipped plugins are better than any summary, and a checkout has them:
+**git-branches** (row badge + settings panel + a verb), **memory-viewer**
+(footer button + overlay + `invoke` for filesystem work — the commonest shape)
+and **workbench** (a full overlay application). Read the one whose shape matches
+what you are building.
+
 ## Step 1 — decide the shape
 
 Ask, if the user has not said:
@@ -57,11 +82,19 @@ Ask, if the user has not said:
 - **Does an agent need to reach it** — an `[agent:…]` verb?
 - **Does it need code at all?**
 
-That last one first, because it changes everything: a plugin that ships only
-`skills/`, `agents/`, `prompts/` and `templates/` needs **no JavaScript**.
-`"entry": {}` is legal when the directory carries a content bundle. If what the
-user wants is a skill and some subagents, build that and stop — do not add an
-engine to have one.
+That last one first, because it changes everything. **Three complete shapes**,
+and picking the smallest one that works is most of the job:
+
+- **Content only** — `skills/`, `agents/`, `prompts/`, `templates/` and no
+  JavaScript at all. `"entry": {}` is legal when the directory carries a
+  content bundle. If what the user wants is a skill and some subagents, build
+  that and stop; do not add an engine in order to have one.
+- **Engine only** — a verb, a session hook, or a feed subscriber with no UI.
+  A normal, complete plugin; the renderer half is optional.
+- **Both halves** — anything the operator has to see or click.
+
+A renderer half with no engine is legal too, but rare: it can only draw, so it
+has nothing to draw *from*.
 
 ## Step 2 — the manifest
 
@@ -81,7 +114,9 @@ engine to have one.
 
 Rules that refuse a manifest outright, so get them right first:
 
-- **The folder name must equal `id`.** Lowercase, digits, hyphens.
+- **The folder name must equal `id`.** Lowercase, digits and hyphens, starting
+  and ending alphanumeric, 1–40 characters. `enabled` is reserved and refused,
+  as is any id a built-in plugin already uses.
 - **`hostApi` is the string `"1"`.** Required — an absent one is refused, not
   defaulted.
 - **`entry` must be an object**, even when empty.
