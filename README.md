@@ -24,9 +24,25 @@ Today: clone this repo, then in Clodex use **Plugins ▸ Manage Plugins… ▸
 Register Plugin…** and pick the plugin's folder. It is linked into
 `~/.clodex/plugins/<id>` without copying; a `git pull` here updates it.
 
-Soon: **Install from GitHub…** in the same dialog, with a spec like
-`avirtual/clodex-plugins:stock-assessments`. Installed plugins are pinned to a
-commit, land disabled until you enable them, and never update on their own.
+Soon: **Install from GitHub…** in the same dialog, taking a source spec —
+`owner/repo`, `owner/repo@ref`, `owner/repo:sub/path`, `owner/repo@ref:sub/path`,
+or a `https://github.com/owner/repo/tree/<ref>/<path>` URL. Since every plugin
+here lives in its own top-level folder, the subpath is just the plugin's id:
+
+```
+avirtual/clodex-plugins:review-kit                     # follows the default branch
+avirtual/clodex-plugins@review-kit-v0.1.0:review-kit   # frozen at that tag
+```
+
+Installed plugins are pinned to a commit, land disabled until you enable them,
+and never update on their own.
+
+**The ref you install from is the release channel.** Install from a branch and
+an update re-resolves that branch, so you pick up later releases when you ask
+for them. Install at a tag and you are pinned to that commit permanently — a tag
+never moves, so such an install will never report an update. That is the point
+of installing at a tag; it is not a bug, and it is the only way to hold a
+version deliberately.
 
 Then attach the plugin to the seat that should hold it (the seat's plugin
 list in its session dialog). A plugin's panel only appears on a seat that
@@ -43,7 +59,8 @@ to judge.
 
 | id | what it does |
 |---|---|
-| _(none yet)_ | |
+| [`review-kit`](review-kit/) | Content only. `/review-kit:review` fans a change out to three focused reviewer subagents and consolidates one ranked report. No code — the whole plugin is four Markdown files and a manifest. |
+| [`turn-log`](turn-log/) | Records what agents say to a per-session log on disk, with a sidebar overlay to browse and search it. Records nothing until a session grants it the `turns` capability. |
 
 `_template/` is a starting point for a new one — copy it, rename the folder to
 your id, fill in the manifest.

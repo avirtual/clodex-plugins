@@ -1,0 +1,53 @@
+/* Injected VERBATIM and unscoped into every window — every selector here is
+   prefixed .tlog so nothing reaches core's DOM or another plugin's. */
+
+.tlog { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 8px; }
+
+.tlog-bar { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.tlog-picker { flex: 0 1 22em; min-width: 8em; }
+.tlog-search { flex: 1 1 auto; min-width: 6em; }
+
+.tlog-btn { flex: 0 0 auto; cursor: pointer; }
+.tlog-danger { color: #c0392b; }
+
+.tlog-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.tlog-row { padding: 8px 0; border-bottom: 1px solid rgba(127, 127, 127, 0.22); }
+
+.tlog-row-head {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 0.82em;
+  opacity: 0.72;
+  margin-bottom: 3px;
+}
+
+.tlog-session { font-weight: 600; opacity: 0.9; }
+
+.tlog-flag {
+  font-size: 0.85em;
+  padding: 0 5px;
+  border-radius: 3px;
+  border: 1px solid rgba(127, 127, 127, 0.4);
+}
+
+.tlog-warn { color: #b8860b; border-color: rgba(184, 134, 11, 0.5); }
+
+.tlog-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
+
+.tlog-files { margin-top: 4px; font-size: 0.82em; opacity: 0.7; overflow-wrap: anywhere; }
+
+.tlog-empty { padding: 18px 0; opacity: 0.7; }
+
+.tlog-note { margin-bottom: 10px; opacity: 0.8; font-size: 0.9em; }
+
+.tlog-field { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+.tlog-field span { flex: 1 1 auto; }
+.tlog-field input { flex: 0 0 7em; }

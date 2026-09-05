@@ -1,0 +1,9 @@
+{
+  "id": "review-kit",
+  "name": "Review Kit",
+  "version": "0.1.0",
+  "hostApi": "1",
+  "entry": {},
+  "enabledByDefault": false,
+  "announce": "A code-review pack: the /review-kit:review skill fans a change out to focused reviewer subagents and consolidates one ranked report. Content only — no engine, no renderer, no intent verb."
+}

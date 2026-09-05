@@ -1,0 +1,14 @@
+{
+  "id": "turn-log",
+  "name": "Turn Log",
+  "version": "0.1.0",
+  "hostApi": "1",
+  "scope": "session",
+  "entry": {
+    "engine": "engine.js",
+    "renderer": "renderer.js"
+  },
+  "style": "style.css",
+  "enabledByDefault": false,
+  "announce": "Records what agents say to a searchable per-session log on disk, and browses it from the sidebar. Writes plain text: only sessions you grant the `turns` capability are recorded, and nothing is recorded until you do."
+}
