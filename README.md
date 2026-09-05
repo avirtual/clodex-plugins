@@ -59,11 +59,14 @@ to judge.
 
 | id | what it does |
 |---|---|
+| [`clodex-plugin-builder`](clodex-plugin-builder/) | **Start here.** Content only. `/clodex-plugin-builder:new-plugin` scaffolds a plugin, wires the surfaces you asked for and verifies it against the real loader; an `api-scout` subagent answers contract questions so the contract stays out of your context. |
 | [`review-kit`](review-kit/) | Content only. `/review-kit:review` fans a change out to three focused reviewer subagents and consolidates one ranked report. No code — the whole plugin is four Markdown files and a manifest. |
 | [`intent-log`](intent-log/) | A live feed of the `[agent:…]` intents every granted seat emits — time, agent, verb, argument — in one window across workspaces. In-memory only; writes nothing. |
 
 `_template/` is a starting point for a new one — copy it, rename the folder to
-your id, fill in the manifest.
+your id, fill in the manifest. Or register `clodex-plugin-builder` and let
+`/clodex-plugin-builder:new-plugin` do it: it knows the rules that refuse a
+manifest, and it verifies the result against the real loader.
 
 ## Layout rules
 
