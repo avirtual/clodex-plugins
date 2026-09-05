@@ -1,57 +1,102 @@
 /* Injected VERBATIM and unscoped into every window — every selector here is
-   prefixed .ilog so nothing reaches core's DOM or another plugin's. */
+   prefixed .ilog so nothing reaches core's DOM or another plugin's.
 
-.ilog { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 6px; }
+   The host creates the `.plugin-overlay` container and styles it as a BACKDROP
+   only (fixed, centred, dark scrim). It does not paint a panel: the panel is
+   the plugin's, so `.ilog` below carries its own background, border and size.
+   Without that, an overlay's contents float on the scrim as bare text.
+
+   Colours come from core's theme variables (declared on :root) rather than
+   fixed hex, so this surface follows the user's theme — there are light themes
+   as well as dark ones, and hardcoded colours are unreadable in half of them. */
+
+.ilog {
+  width: 100%;
+  max-width: 1100px;
+  height: 82vh;
+  max-height: 90vh;
+  min-width: 420px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  box-sizing: border-box;
+  background: var(--sidebar-bg, #16213e);
+  color: var(--text, #eee);
+  border: 1px solid var(--accent, #e94560);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
 
 .ilog-bar { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+
+.ilog-pick,
+.ilog-btn {
+  background: var(--bg, #1a1a2e);
+  color: var(--text, #eee);
+  border: 1px solid var(--border, #253253);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
 .ilog-pick { flex: 0 1 12em; min-width: 7em; }
 .ilog-btn { flex: 0 0 auto; cursor: pointer; }
-.ilog-count { margin-left: auto; opacity: 0.6; font-size: 0.85em; }
+.ilog-btn:hover { background: var(--sidebar-hover, #1a2744); border-color: var(--accent, #e94560); }
+
+.ilog-count { margin-left: auto; color: var(--text-dim, #949eb1); font-size: 11px; }
 
 .ilog-head,
 .ilog-row {
   display: grid;
-  grid-template-columns: 5.5em 10em 9em 1fr;
+  grid-template-columns: 5.5em minmax(6em, 12em) minmax(6em, 11em) minmax(0, 1fr);
   gap: 10px;
   align-items: baseline;
 }
 
 .ilog-head {
   flex: 0 0 auto;
-  font-size: 0.78em;
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  opacity: 0.5;
-  padding-bottom: 4px;
-  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+  letter-spacing: 0.06em;
+  color: var(--text-dim, #949eb1);
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--border, #253253);
 }
 
 .ilog-rows {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
-.ilog-row { padding: 3px 0; border-bottom: 1px solid rgba(127, 127, 127, 0.12); }
-.ilog-row:hover { background: rgba(127, 127, 127, 0.07); }
+.ilog-row { padding: 4px 0; border-bottom: 1px solid var(--border, #253253); }
+.ilog-row:hover { background: var(--sidebar-hover, #1a2744); }
 
-.ilog-at { opacity: 0.6; font-size: 0.9em; }
-.ilog-agent { font-weight: 600; overflow-wrap: anywhere; }
+.ilog-at { color: var(--text-dim, #949eb1); }
+
+/* min-width:0 lets a long name ellipsize instead of widening its column. */
+.ilog-agent { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ilog-verb {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.88em;
-  opacity: 0.95;
-  overflow-wrap: anywhere;
+  font-size: 11px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* The three that change state elsewhere read differently from the rest. */
-.ilog-verb[data-verb="dm"] { color: #2e86c1; }
-.ilog-verb[data-verb="task"] { color: #8e44ad; }
+/* The four that change something outside the seat that emitted them. */
+.ilog-verb[data-verb="dm"] { color: var(--ok, #98c379); }
+.ilog-verb[data-verb="task"] { color: var(--accent, #e94560); }
 .ilog-verb[data-verb="exec"],
-.ilog-verb[data-verb="term"] { color: #c0392b; }
+.ilog-verb[data-verb="term"] { color: var(--warn, #e5c07b); }
 
-.ilog-arg { opacity: 0.8; overflow-wrap: anywhere; }
+.ilog-arg { color: var(--text-dim, #949eb1); min-width: 0; overflow-wrap: anywhere; }
 
-.ilog-empty { padding: 18px 0; opacity: 0.7; }
+.ilog-empty { padding: 18px 2px; color: var(--text-dim, #949eb1); font-size: 12px; line-height: 1.5; }
