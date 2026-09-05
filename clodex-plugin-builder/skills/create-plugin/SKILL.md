@@ -159,8 +159,16 @@ security rule, not an ergonomic one:
    (`{session}`, `{workspace}`, or `'all'`), and an omitted one is a logged
    no-op, not a broadcast. `'all'` reaches every workspace, so it carries
    **invalidation hints only** — say the thing changed, let each window pull.
+   A **counter or a row id is data, not a hint**: `{ seq }` on an `'all'` emit
+   tells every workspace how busy the others are. If the receiver pulls anyway,
+   send `null` — the easiest way to leak is to ship a number that felt like
+   metadata.
 5. **Events are unbuffered**: a window closed during an emit hears nothing, so
    your surface must pull its own state on open. Events only save you a timer.
+   If your pull is incremental (`since: lastId`), decide what happens when the
+   engine's counter goes **backwards** — a re-scan restarts it at zero, and a
+   pane holding a higher mark then waits for an id that is never issued and
+   silently never paints again. Re-pull from zero when you see it rewind.
 6. **`paths.dataDir` is not created for you.** `mkdir -p` it before writing your
    own files.
 7. **Realpath every path a user or an agent named, on every read**, and
