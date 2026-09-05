@@ -30,6 +30,19 @@ host's own loader, so it catches what reading cannot. If you find no checkout,
 work from `plugin-api.md` alone and say in your final message that the plugin is
 unverified.
 
+With no local copy at all, fetch the four docs from the public repo:
+
+```
+https://raw.githubusercontent.com/avirtual/clodex/master/plugins/plugin-api.md
+https://raw.githubusercontent.com/avirtual/clodex/master/plugins/what-plugins-can-do.md
+https://raw.githubusercontent.com/avirtual/clodex/master/plugins/plugin-sources.md
+https://raw.githubusercontent.com/avirtual/clodex/master/plugins/README.md
+```
+
+`master` may describe a Clodex newer than the one installed, so prefer whatever
+is on disk. If the running app refuses your plugin over `hostApi`, you read the
+docs for a different host.
+
 Delegate the reading to `clodex-plugin-builder:api-scout` rather than pulling
 the whole contract into your own context. Ask it for the specific sections your
 plugin needs; it returns the rules and the signatures, not the prose.
@@ -96,7 +109,8 @@ module.exports.deactivate = () => { /* release anything the host cannot */ };
 Define `deactivate` at **module scope**, not by assigning to `module.exports`
 inside `activate`.
 
-Six rules that are not obvious and cost a debugging session each:
+Nine rules that are not obvious and cost a debugging session each — rule 7 is a
+security rule, not an ergonomic one:
 
 1. **Feature-check any recent API and throw**, naming the capability rather than
    a version: `hostApi` stays `"1"` and new APIs arrive additively, so the
@@ -114,6 +128,19 @@ Six rules that are not obvious and cost a debugging session each:
    your surface must pull its own state on open. Events only save you a timer.
 6. **`paths.dataDir` is not created for you.** `mkdir -p` it before writing your
    own files.
+7. **Realpath every path a user or an agent named, on every read**, and
+   prefix-check the resolved string against the root you confine to. A lexical
+   `path.join` is defeated by a symlink inside the tree pointing out of it: the
+   joined string stays under your root and the open does not. `fsScope` does not
+   do this for you — it answers "local session, which cwd", and is explicitly
+   not cwd confinement and not a sandbox.
+8. **Node's module cache survives a disable.** Re-enabling calls `activate()`
+   again on the same module object, so initialise state inside `activate()`,
+   never at module scope.
+9. **A renderer half is desktop-only for a plugin outside the Clodex repo.** The
+   browser bundle is built with the app and inlines only the repo's own plugins,
+   so a registered external plugin gets its engine half on the web surface and
+   no UI there. Design around it; do not try to fix it.
 
 ## Step 4 — surfaces
 
@@ -127,6 +154,61 @@ the ones you use. Two behaviours that surprise people:
   paint is blank by design.
 - **`mount(root)` on an overlay runs once, lazily, at first open.** One-time
   construction in `mount`, per-open refresh in `onOpen`.
+
+## Step 4a — styling, where a first plugin looks broken
+
+Two mistakes make a working plugin look like a failed one. Both are invisible
+until someone opens the surface, and neither is caught by any verifier.
+
+**1. The host paints the backdrop; YOU paint the panel.** For an overlay, the
+host creates `<div class="plugin-overlay">` and styles it as a scrim only —
+fixed, full-screen, centred, translucent black. It draws no card. If your root
+element has no background, border or size, your controls float as bare text on
+the dark scrim and the plugin reads as broken. Give your own top-level element
+a panel:
+
+```css
+.myplugin {
+  width: 100%; max-width: 1100px; height: 82vh;
+  display: flex; flex-direction: column;
+  padding: 14px 16px; box-sizing: border-box;
+  background: var(--sidebar-bg); color: var(--text);
+  border: 1px solid var(--accent); border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+```
+
+Do **not** restyle `.plugin-overlay` itself: the host creates, toggles and
+removes it, so it is host contract rather than plugin skin.
+
+**2. Use the theme variables. Never hardcode a colour.** Clodex ships several
+themes and **some are light**, selected by `[data-theme]` on the document. A
+dark-theme hex that looks right while you build it is unreadable for any user on
+a light theme — and you will not notice, because you are not on one.
+
+Core declares these on `:root`, and a plugin stylesheet inherits them:
+
+| Variable | Use for |
+|---|---|
+| `--bg` | the window background; inputs and buttons |
+| `--sidebar-bg` | a panel or card sitting above the background |
+| `--sidebar-hover` | hover states |
+| `--text` | body text |
+| `--text-dim` | secondary text, timestamps, labels |
+| `--accent` | your panel border, selection, emphasis |
+| `--border` | rules, separators, input borders |
+| `--warn`, `--error`, `--ok` | semantic states, contrast-corrected per theme |
+
+Write `var(--text-dim, #949eb1)` — the fallback keeps the stylesheet sane if it
+is ever read outside the app. Ask the scout to read the current variable list out
+of core's stylesheet rather than trusting this table if the exact palette
+matters; themes gain variables over time.
+
+For everything else, remember the stylesheet is injected **verbatim and
+unscoped** into every window: prefix every selector with one class of your own
+(`.myplugin-row`, not `.row`), or you restyle Clodex itself and every other
+plugin.
 
 ## Step 5 — an intent verb, if it needs one
 
