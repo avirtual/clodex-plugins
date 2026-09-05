@@ -1,0 +1,13 @@
+{
+  "id": "my-plugin",
+  "name": "My Plugin",
+  "version": "0.1.0",
+  "hostApi": "1",
+  "entry": {
+    "engine": "engine.js",
+    "renderer": "renderer.js"
+  },
+  "style": "style.css",
+  "enabledByDefault": false,
+  "announce": "One sentence: what this plugin does, shown in Manage Plugins."
+}
