@@ -60,7 +60,7 @@ to judge.
 | id | what it does |
 |---|---|
 | [`review-kit`](review-kit/) | Content only. `/review-kit:review` fans a change out to three focused reviewer subagents and consolidates one ranked report. No code — the whole plugin is four Markdown files and a manifest. |
-| [`turn-log`](turn-log/) | Records what agents say to a per-session log on disk, with a sidebar overlay to browse and search it. Records nothing until a session grants it the `turns` capability. |
+| [`intent-log`](intent-log/) | A live feed of the `[agent:…]` intents every granted seat emits — time, agent, verb, argument — in one window across workspaces. In-memory only; writes nothing. |
 
 `_template/` is a starting point for a new one — copy it, rename the folder to
 your id, fill in the manifest.

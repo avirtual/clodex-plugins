@@ -1,0 +1,57 @@
+/* Injected VERBATIM and unscoped into every window — every selector here is
+   prefixed .ilog so nothing reaches core's DOM or another plugin's. */
+
+.ilog { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 6px; }
+
+.ilog-bar { display: flex; gap: 8px; align-items: center; flex: 0 0 auto; }
+.ilog-pick { flex: 0 1 12em; min-width: 7em; }
+.ilog-btn { flex: 0 0 auto; cursor: pointer; }
+.ilog-count { margin-left: auto; opacity: 0.6; font-size: 0.85em; }
+
+.ilog-head,
+.ilog-row {
+  display: grid;
+  grid-template-columns: 5.5em 10em 9em 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.ilog-head {
+  flex: 0 0 auto;
+  font-size: 0.78em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  opacity: 0.5;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.25);
+}
+
+.ilog-rows {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.ilog-row { padding: 3px 0; border-bottom: 1px solid rgba(127, 127, 127, 0.12); }
+.ilog-row:hover { background: rgba(127, 127, 127, 0.07); }
+
+.ilog-at { opacity: 0.6; font-size: 0.9em; }
+.ilog-agent { font-weight: 600; overflow-wrap: anywhere; }
+
+.ilog-verb {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.88em;
+  opacity: 0.95;
+  overflow-wrap: anywhere;
+}
+
+/* The three that change state elsewhere read differently from the rest. */
+.ilog-verb[data-verb="dm"] { color: #2e86c1; }
+.ilog-verb[data-verb="task"] { color: #8e44ad; }
+.ilog-verb[data-verb="exec"],
+.ilog-verb[data-verb="term"] { color: #c0392b; }
+
+.ilog-arg { opacity: 0.8; overflow-wrap: anywhere; }
+
+.ilog-empty { padding: 18px 0; opacity: 0.7; }
