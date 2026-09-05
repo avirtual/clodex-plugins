@@ -47,6 +47,9 @@ module.exports.activate = (rhost) => {
     verb.dataset.verb = line.verb;
     row.appendChild(verb);
     row.appendChild(el('span', 'ilog-arg', line.arg || ''));
+    // The argument is one ellipsized line, so the full text lives on the title.
+    // Set as a property, never as markup — this is agent output.
+    if (line.arg) row.title = line.arg;
     return row;
   };
 
@@ -73,6 +76,14 @@ module.exports.activate = (rhost) => {
     if (reset) { since = 0; refs.rows.replaceChildren(); }
     const r = await rhost.invoke('recent', { since, ...filters() });
     if (!r || !r.ok) { empty(`Could not read the feed: ${(r && r.error) || 'no reply'}`); return; }
+
+    // A counter below our own high-water mark means the feed restarted — the
+    // engine was re-scanned, or another window cleared it. Without this the
+    // pane waits for an id that will never be issued and never paints again.
+    // This reply was filtered against the stale mark, so it is empty by
+    // construction: ask again from zero rather than painting "nothing yet".
+    if (r.seq < since) { since = 0; return pull(true); }
+
     keepPickers(r);
     if (!r.lines.length && since === 0) {
       empty('Nothing yet. A seat appears here once it holds this plugin AND has '

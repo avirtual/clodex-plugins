@@ -97,6 +97,15 @@
 .ilog-verb[data-verb="exec"],
 .ilog-verb[data-verb="term"] { color: var(--warn, #e5c07b); }
 
-.ilog-arg { color: var(--text-dim, #949eb1); min-width: 0; overflow-wrap: anywhere; }
+/* One line per row, ellipsized. Wrapping instead grows the row, and the last
+   row in the scroller is then sheared off mid-line by the container. The full
+   text is on the row's title attribute. */
+.ilog-arg {
+  color: var(--text-dim, #949eb1);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .ilog-empty { padding: 18px 2px; color: var(--text-dim, #949eb1); font-size: 12px; line-height: 1.5; }
