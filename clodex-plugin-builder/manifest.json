@@ -5,5 +5,5 @@
   "hostApi": "1",
   "entry": {},
   "enabledByDefault": false,
-  "announce": "Build a Clodex plugin without reading the whole contract first: /clodex-plugin-builder:new-plugin scaffolds one, wires the surfaces you asked for, and verifies it against the real loader. Content only — no code."
+  "announce": "Build a Clodex plugin without reading the whole contract first: /clodex-plugin-builder:create-plugin scaffolds one, wires the surfaces you asked for, and verifies it against the real loader. Content only — no code."
 }

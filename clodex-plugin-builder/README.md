@@ -13,7 +13,7 @@ to create, wherever you point it.
 
 ## What you get
 
-- `/clodex-plugin-builder:new-plugin <id> [what it should do]` — the build
+- `/clodex-plugin-builder:create-plugin <id> [what it should do]` — the build
   workflow, start to verified.
 - `clodex-plugin-builder:api-scout` — reads `plugin-api.md` on this machine and
   returns the rules and signatures for a specific surface. Delegate to it

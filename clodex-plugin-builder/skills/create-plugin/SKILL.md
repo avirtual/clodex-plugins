@@ -1,5 +1,5 @@
 ---
-description: Build a Clodex plugin end to end - scaffold it, wire the surfaces it needs, and verify it against the real loader. Usage - /clodex-plugin-builder:new-plugin <id> [what it should do]
+description: Build a Clodex plugin end to end - scaffold it, wire the surfaces it needs, and verify it against the real loader. Usage - /clodex-plugin-builder:create-plugin <id> [what it should do]
 ---
 # Build a Clodex plugin
 

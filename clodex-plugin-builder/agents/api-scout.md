@@ -1,5 +1,5 @@
 ---
-description: Reads the Clodex plugin contract and returns the exact rules and signatures for the surfaces a plugin needs. Spawned by the new-plugin skill so the contract never enters the coordinator's context.
+description: Reads the Clodex plugin contract and returns the exact rules and signatures for the surfaces a plugin needs. Spawned by the create-plugin skill so the contract never enters the coordinator's context.
 tools: Read, Grep, Glob, Bash
 model: sonnet
 ---
