@@ -13,6 +13,10 @@
 
 /* --------------------------------------------------------------- helpers --- */
 
+// What the button SAYS it will type. The engine builds the line it actually
+// injects; this is only what the operator is shown, and the two must agree.
+const RESEARCH_CMD = '/crypto-research:crypto-research';
+
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -43,6 +47,37 @@ function pctClass(v) {
   if (v > 0) return 'cr-up';
   if (v < 0) return 'cr-down';
   return 'cr-flat';
+}
+
+function fmtAgo(ms) {
+  const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  return `${Math.round(mins / 60)}h ago`;
+}
+
+/**
+ * The text the operator decides on before an expensive run starts.
+ *
+ * It names the exact line to be typed and the session that receives it, because
+ * that is the whole decision: this is the one control in this viewer that
+ * spends money and time rather than displaying something already paid for.
+ */
+function confirmRerunText(ticker, sessionName, reasons) {
+  const out = [`Run ${RESEARCH_CMD} ${ticker} in “${sessionName}”?`, ''];
+  if (reasons && reasons.length) {
+    out.push('Why it looks due:');
+    for (const r of reasons) out.push(`  · ${r}`);
+    out.push('');
+  }
+  out.push('This starts a full research run — two researchers and an assessor,');
+  out.push('with a lot of web research — and writes a new dated run folder.');
+  out.push('');
+  out.push('A run on a date that already has one overwrites its files.');
+  out.push('');
+  out.push('It is typed into that session as if you had typed it, so it lands');
+  out.push('with the agent’s next turn if it is busy.');
+  return out.join('\n');
 }
 
 function scoreBand(n) {
@@ -342,6 +377,10 @@ module.exports.activate = (rhost) => {
     rootEl.appendChild(modal);
 
     let state = { tickers: [], watch: [], selTicker: null, selRun: null, selDoc: null, range: '30d' };
+    // Whether this window's session can run research, and the tickers already
+    // sent. Both come from the engine on every reload — never assumed here.
+    let runner = null;
+    let requests = {};
 
     /* ------------------------------------------------------------ quote --- */
 
@@ -495,6 +534,86 @@ module.exports.activate = (rhost) => {
       }
     }
 
+    /* -------------------------------------------------------- re-run --- */
+
+    /**
+     * The re-run control, in one of three states.
+     *
+     * A cooldown REPLACES the button rather than disabling it. inject cannot
+     * confirm delivery, so after a click there is nothing observable to say the
+     * request landed — a still-clickable button invites a second expensive run,
+     * and a greyed one says "wait" without saying what for.
+     */
+    function buildRerun(t) {
+      const wrap = el('div', 'cr-rerun');
+      const last = requests[t.ticker];
+
+      if (Number.isFinite(last)) {
+        const note = el('div', 'cr-rerun-sent', `↻ requested ${fmtAgo(last)}`);
+        note.title = `${RESEARCH_CMD} ${t.ticker} was typed into a session ${fmtAgo(last)}.\n`
+          + 'Clodex cannot confirm an injected line was received, so this is a record of the request, not of the run.';
+        wrap.appendChild(note);
+        return wrap;
+      }
+
+      if (!runner || runner.ok !== true) {
+        // Explained, not hidden: a missing button with no reason reads as a
+        // broken plugin, and the reason is usually one the operator can fix by
+        // clicking a different session.
+        const off = el('div', 'cr-rerun-off', '↻ re-run unavailable');
+        off.title = (runner && runner.reason)
+          ? `${runner.reason}. Open this from a Claude session in this workspace to re-run research.`
+          : 'Open this from a Claude session in this workspace to re-run research.';
+        wrap.appendChild(off);
+        return wrap;
+      }
+
+      const btn = el('button', 'cr-rerun-btn', `↻ Re-assess ${t.ticker}`);
+      const reasons = t.dueReasons || [];
+      if (reasons.length) btn.classList.add('cr-rerun-due');
+      btn.title = reasons.length
+        ? `${reasons.join('; ')}\nTypes ${RESEARCH_CMD} ${t.ticker} into “${runner.name}”`
+        : `Type ${RESEARCH_CMD} ${t.ticker} into “${runner.name}”`;
+      btn.addEventListener('click', () => {
+        doRerun(t, btn).catch((e) => rhost.log.error('rerun failed', e));
+      });
+      wrap.appendChild(btn);
+      return wrap;
+    }
+
+    async function doRerun(t, btn) {
+      // Re-entrancy guard: two dialogs from a double-click would mean two runs.
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        if (!confirm(confirmRerunText(t.ticker, runner.name, t.dueReasons))) return;
+        let res;
+        try {
+          res = await rhost.invoke('rerun', { sessionName: rhost.sessions.active(), ticker: t.ticker });
+        } catch (e) {
+          rhost.log.error('rerun invoke failed', e);
+          res = null;
+        }
+        if (torn) return;
+        if (!res || res.ok !== true) {
+          rhost.ui.showToast((res && res.error) || 'Could not start the research run', { kind: 'error' });
+          // A refusal may carry fresher cooldown state than this window has —
+          // another window firing the same ticker is exactly how that happens.
+          if (res && res.requests) {
+            requests = res.requests;
+            paintRuns(t.ticker);
+          }
+          return;
+        }
+        requests = res.requests || requests;
+        // "Sent to", not "started": all that is known is that inject was called.
+        rhost.ui.showToast(`Sent “${res.command}” to ${res.session}`, { kind: 'info' });
+        paintRuns(t.ticker);
+      } finally {
+        if (!torn && btn.isConnected) btn.disabled = false;
+      }
+    }
+
     /* ------------------------------------------------------------ runs --- */
 
     function paintRuns(ticker) {
@@ -503,6 +622,10 @@ module.exports.activate = (rhost) => {
       if (!t) return;
 
       colRuns.appendChild(el('div', 'cr-colhead', `${t.ticker} — ${t.runCount} run${t.runCount === 1 ? '' : 's'}`));
+      // Above the run cards: it acts on the ticker, not on any one dated run,
+      // and putting it under the list would hide it behind a scroll for a
+      // ticker with a long history.
+      colRuns.appendChild(buildRerun(t));
 
       const mine = state.watch.filter((w) => w.ticker === ticker);
       if (mine.length) {
@@ -630,6 +753,8 @@ module.exports.activate = (rhost) => {
 
       state.tickers = res.tickers || [];
       state.watch = res.watch || [];
+      runner = res.runner || null;
+      requests = res.requests || {};
       rootLabel.textContent = `${res.root}${res.via === 'settings' ? ' (set in settings)' : ''}`;
       rootLabel.title = res.root;
 
@@ -706,5 +831,7 @@ module.exports.activate = (rhost) => {
 
 // Exported for the tests; not part of the plugin surface.
 module.exports.renderMarkdown = renderMarkdown;
+module.exports.confirmRerunText = confirmRerunText;
+module.exports._fmtAgo = fmtAgo;
 module.exports._fmtUsd = fmtUsd;
 module.exports._scoreBand = scoreBand;

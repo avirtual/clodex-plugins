@@ -63,6 +63,7 @@ to judge.
 | [`review-kit`](review-kit/) | Content only. `/review-kit:review` fans a change out to three focused reviewer subagents and consolidates one ranked report. No code — the whole plugin is four Markdown files and a manifest. |
 | [`intent-log`](intent-log/) | A live feed of the `[agent:…]` intents every granted seat emits — time, agent, verb, argument — in one window across workspaces. In-memory only; writes nothing. |
 | [`stock-assessments`](stock-assessments/) | **A worked example of a full plugin**, both halves plus a content bundle: a viewer for dated equity-research documents with a live quote header, and the research pipeline that produces them. Built against a real corpus rather than a demo, so it shows what the shapes here look like at size. Note the two asymmetries it carries — it calls a public HTTP endpoint, and its re-assess button spends tokens. |
+| [`crypto-research`](crypto-research/) | The same shape for tokens, and **the one that adds an `[agent:…]` verb**: `[agent:cryptowatch]` records a dated thing to watch, which later lights the re-assess button. Both halves, a content bundle and an intent verb — the fullest plugin here. Also spends tokens, and calls public price endpoints. |
 
 `_template/` is a starting point for a new one — copy it, rename the folder to
 your id, fill in the manifest. Or register `clodex-plugin-builder` and let

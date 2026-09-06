@@ -33,6 +33,15 @@ const MAX_DOC_BYTES = 2 * 1024 * 1024;
 const MAX_WATCH = 200;
 const HOW_FAR_UP = 3; // levels above a session cwd we will look for research/
 
+// The skill is invoked as `/<plugin-id>:<skill>`, so the id is needed verbatim.
+// A bare `/crypto-research` would resolve only against a copy in the operator's
+// personal skill library — a second, silently divergent copy of the same file.
+const PLUGIN_ID = 'crypto-research';
+
+// An assessment older than this looks due. Same threshold as the `stale · Nd`
+// chip the viewer already draws, so the two never disagree on screen.
+const STALE_DAYS = 30;
+
 /* ------------------------------------------------------------ the library --- */
 
 /**
@@ -60,14 +69,8 @@ function resolveRoot(sessionName) {
     return { error: 'the active session has no local working directory (a peer session has no local filesystem to read)', via: 'session' };
   }
 
-  let dir = path.resolve(scope.cwd);
-  for (let i = 0; i <= HOW_FAR_UP; i += 1) {
-    const cand = path.join(dir, 'research');
-    if (isDir(cand)) return { root: cand, via: 'session' };
-    const up = path.dirname(dir);
-    if (up === dir) break;
-    dir = up;
-  }
+  const found = findLibraryUpwards(scope.cwd);
+  if (found) return { root: found, via: 'session' };
   return {
     error: `no research/ folder in ${scope.cwd} or its parents — set one in settings, or run /crypto-research:crypto-research to create it`,
     via: 'session',
@@ -76,6 +79,26 @@ function resolveRoot(sessionName) {
 
 function isDir(p) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+/**
+ * Walk up from `cwd` looking for a research/ folder. Returns it, or null.
+ *
+ * Shared by resolveRoot and by the re-run guard, so the question "which library
+ * does this session belong to" is answered by one piece of code — two copies of
+ * this loop would eventually disagree about HOW_FAR_UP and the button would
+ * offer to write into a library the viewer is not showing.
+ */
+function findLibraryUpwards(cwd) {
+  let dir = path.resolve(cwd);
+  for (let i = 0; i <= HOW_FAR_UP; i += 1) {
+    const cand = path.join(dir, 'research');
+    if (isDir(cand)) return cand;
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return null;
 }
 
 /**
@@ -156,9 +179,40 @@ function labelFor(file) {
   return file.replace(/\.md$/, '').replace(/[._]/g, ' ');
 }
 
-function buildIndex(root) {
+/**
+ * Why this ticker might want a re-run, as human-readable reasons.
+ *
+ * Two sources, both on disk: the age of the newest assessment, and any watch
+ * item whose date has arrived since that assessment was written — a dated thing
+ * an agent said to watch for, which has now happened unassessed.
+ */
+function dueReasonsFor(latestDate, ageDays, watchItems) {
+  const reasons = [];
+  if (Number.isFinite(ageDays) && ageDays >= STALE_DAYS) {
+    reasons.push(`last assessment is ${ageDays} days old`);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  for (const w of watchItems || []) {
+    // String compare is correct for ISO dates and avoids a timezone question.
+    // `<= today` counts today as passed: a date lands during the day and the
+    // assessment that would cover it does not exist yet.
+    if (w.due && w.due > latestDate && w.due <= today) {
+      reasons.push(`watch item ${w.due} passed — ${String(w.note || '').slice(0, 60)}`);
+    }
+  }
+  return reasons;
+}
+
+function buildIndex(root, watch) {
   let entries = [];
   try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { return []; }
+
+  // Grouped once, not re-scanned per ticker.
+  const watchByTicker = {};
+  for (const w of watch || []) {
+    if (!w || typeof w.ticker !== 'string') continue;
+    (watchByTicker[w.ticker] = watchByTicker[w.ticker] || []).push(w);
+  }
 
   const tickers = [];
   for (const ent of entries) {
@@ -213,6 +267,11 @@ function buildIndex(root) {
     const ageDays = Math.floor((Date.now() - Date.parse(`${runs[0].date}T00:00:00Z`)) / 86400000);
 
     tickers.push({
+      // Why a re-run might be wanted, in words the confirm dialog can show.
+      // An empty list means "nothing on disk says so" — NOT "no reason to look":
+      // the triggers that matter most for a token (a depeg, an exploit, an
+      // unlock landing early) leave no trace in this directory at all.
+      dueReasons: dueReasonsFor(runs[0].date, ageDays, watchByTicker[ticker]),
       ticker,
       latest: runs[0].date,
       score: runs[0].score,
@@ -247,6 +306,115 @@ function saveWatch(list) {
   return host.storage.set(all);
 }
 
+/* --------------------------------------------------------- re-running --- */
+/*
+ * `inject` types into a session's input as if the operator had typed it. That
+ * makes this the one thing in this plugin that CAUSES work rather than showing
+ * it, and a crypto-research run is expensive — two subagents, an assessor, and
+ * a lot of web research. Three properties of inject shape everything below:
+ *
+ *   - It is fire-and-forget: it returns undefined and cannot say whether the
+ *     text was delivered, parked behind a mid-turn hold, or dropped into a dead
+ *     session. So a click can produce no visible effect, and the natural
+ *     response to that is to click again.
+ *   - A newline may submit early, splitting one message into several. The
+ *     command is built as a single line and collapsed before it is sent.
+ *   - Anything not a string is coerced, never rejected — so a bug in the value
+ *     becomes visible text in the operator's prompt.
+ *
+ * The answers: only ever offer the session this window is already showing, and
+ * only when it is a live claude seat rooted in the library being viewed; then
+ * record the request, so the UI can show a cooldown in place of a button whose
+ * delivery it cannot confirm.
+ */
+
+// Collapse to one line. Built from strings rather than regex literals: a raw
+// control byte inside a literal is invisible and does not survive reformatting,
+// at which point the class silently narrows and the collapse stops happening
+// with no error anywhere.
+const ANSI = new RegExp('\\u001B\\[[0-9;?]*[a-zA-Z]|\\u001B\\][^\\u0007]*\\u0007', 'g');
+const CTRL = new RegExp('[\\u0000-\\u001F\\u007F]+', 'g');
+const RUNS = new RegExp('\\s+', 'g');
+
+function oneLine(text) {
+  return String(text).replace(ANSI, '').replace(CTRL, ' ').replace(RUNS, ' ').trim();
+}
+
+// A click cannot be confirmed delivered, so it is remembered instead. Long
+// enough that a parked inject has surfaced and a run has visibly started; short
+// enough not to block a deliberate second look at a moving story.
+const COOLDOWN_MS = 15 * 60 * 1000;
+
+function recentRequests() {
+  const saved = (host.storage.get() || {}).requests;
+  if (!saved || typeof saved !== 'object') return {};
+  const cutoff = Date.now() - COOLDOWN_MS;
+  const out = {};
+  // Pruned on read: nothing else runs, so an entry that aged out while the app
+  // was closed must not come back as a live cooldown.
+  for (const [k, v] of Object.entries(saved)) {
+    if (typeof v === 'number' && v > cutoff) out[k] = v;
+  }
+  return out;
+}
+
+function noteRequest(ticker) {
+  const requests = recentRequests();
+  requests[ticker] = Date.now();
+  const all = host.storage.get() || {};   // read, modify, write — set replaces
+  all.requests = requests;
+  host.storage.set(all);
+  return requests;
+}
+
+/**
+ * Can THIS window's active session run the skill against THIS library?
+ *
+ * Deliberately not a session picker. Enumerating sessions and choosing one for
+ * the operator would mean guessing which agent should absorb an expensive run,
+ * and would happily aim at another workspace — writing research/ into an
+ * unrelated repo. Restricting it to the session already on screen makes the
+ * workspace question answer itself.
+ */
+function describeRunner(sessionName, root) {
+  if (typeof sessionName !== 'string' || !sessionName) {
+    return { ok: false, reason: 'no active session in this window' };
+  }
+  let handle = null;
+  try { handle = host.sessions.get(sessionName); } catch { /* treated as absent */ }
+  if (!handle) return { ok: false, reason: 'no active session in this window' };
+  if (handle.type !== 'claude') {
+    // A bash or codex seat has no skills; injecting there types a line that
+    // simply fails in front of the operator.
+    return { ok: false, name: sessionName, reason: `${sessionName} is a ${handle.type} session — no skills` };
+  }
+  if (typeof handle.isAlive === 'function' && !handle.isAlive()) {
+    return { ok: false, name: sessionName, reason: `${sessionName} is not running` };
+  }
+  // fsScope, not handle.cwd: it is the host guard that refuses a peer session,
+  // whose filesystem is on another machine entirely.
+  let scope = null;
+  try { scope = host.sessions.fsScope(sessionName); } catch { /* treated as no scope */ }
+  if (!scope || scope.error || !scope.cwd) {
+    return {
+      ok: false,
+      name: sessionName,
+      reason: scope && scope.error === 'remote'
+        ? `${sessionName} runs on another machine`
+        : `${sessionName} has no working directory`,
+    };
+  }
+  // The seat must belong to the library on screen. A settings-pinned root is
+  // the case that makes this necessary: the viewer may be showing a library the
+  // active seat has nothing to do with, and injecting there would write a run
+  // into a different repo than the one being read.
+  const found = findLibraryUpwards(scope.cwd);
+  if (!found || path.resolve(found) !== path.resolve(root)) {
+    return { ok: false, name: sessionName, reason: `${sessionName} is not in this library's workspace` };
+  }
+  return { ok: true, name: sessionName };
+}
+
 /* ------------------------------------------------------------- lifecycle --- */
 
 module.exports.activate = (h) => {
@@ -268,7 +436,7 @@ module.exports.activate = (h) => {
     throw new Error('this host has no host.settings; a newer Clodex is needed for the folder setting');
   }
   if (!h.storage || typeof h.storage.get !== 'function' || typeof h.storage.set !== 'function') {
-    throw new Error('this host has no host.storage; a newer Clodex is needed for the watch list');
+    throw new Error('this host has no host.storage; a newer Clodex is needed for the watch list and the re-assess cooldown');
   }
   if (!h.ipc || typeof h.ipc.handle !== 'function') {
     throw new Error('this host has no host.ipc.handle; a newer Clodex is needed to serve the viewer');
@@ -289,7 +457,16 @@ module.exports.activate = (h) => {
   host.ipc.handle('index', (sessionName) => {
     const r = resolveRoot(sessionName);
     if (!r.root) return { ok: false, error: r.error, via: r.via };
-    return { ok: true, root: r.root, via: r.via, tickers: buildIndex(r.root), watch: loadWatch() };
+    const watch = loadWatch();
+    return {
+      ok: true,
+      root: r.root,
+      via: r.via,
+      tickers: buildIndex(r.root, watch),
+      watch,
+      runner: describeRunner(sessionName, r.root),
+      requests: recentRequests(),
+    };
   });
 
   host.ipc.handle('doc', (payload) => {
@@ -338,6 +515,80 @@ module.exports.activate = (h) => {
   host.ipc.handle('clearRoot', () => {
     host.settings.set({ root: '' });
     return { ok: true };
+  });
+
+  /**
+   * Type `/crypto-research:crypto-research <TICKER>` into this window's active
+   * session.
+   *
+   * Every guard is re-run here rather than trusted from the listing the button
+   * was drawn from: that listing is as old as the last overlay open, and the
+   * session may have exited, changed workspace or been replaced since.
+   */
+  host.ipc.handle('rerun', (payload) => {
+    const { sessionName, ticker } = payload || {};
+    if (typeof ticker !== 'string' || !TICKER_RE.test(ticker)) {
+      return { ok: false, error: 'invalid ticker' };
+    }
+
+    const r = resolveRoot(sessionName);
+    if (!r.root) return { ok: false, error: r.error || 'no library' };
+
+    // Only a ticker that already has a folder on disk. This is not a "research
+    // anything" button — it re-runs something the directory walk found, which
+    // keeps the injected text bounded by what is actually in the library.
+    if (!isDir(path.join(r.root, ticker))) {
+      return { ok: false, error: `no research folder for ${ticker}` };
+    }
+
+    const runner = describeRunner(sessionName, r.root);
+    if (!runner.ok) return { ok: false, error: runner.reason };
+
+    // The cooldown is enforced HERE, not only in the renderer that hides the
+    // button. Every window draws its own button from its own last listing, so a
+    // second window still shows one after the first has fired — and two clicks
+    // means two full research runs. The engine is the only half that sees all
+    // of them.
+    const already = recentRequests()[ticker];
+    if (Number.isFinite(already)) {
+      const mins = Math.max(1, Math.round((Date.now() - already) / 60000));
+      return {
+        ok: false,
+        error: `${ticker} was already sent for re-assessment ${mins}m ago`,
+        requests: recentRequests(),
+      };
+    }
+
+    let handle = null;
+    try { handle = host.sessions.get(runner.name); } catch { /* treated as absent */ }
+    if (!handle || (typeof handle.isAlive === 'function' && !handle.isAlive())) {
+      return { ok: false, error: `${runner.name} is not running` };
+    }
+
+    /*
+     * One line, collapsed, built from a ticker that has already passed
+     * TICKER_RE — so there is nothing in it that could split the turn.
+     *
+     * The NAMESPACED skill name, because the skill ships in this plugin's own
+     * skills/ bundle. This is safe for the seat that can click: the footer
+     * button is removed and the overlay refused for a seat without this plugin,
+     * so the runner always holds it. The one gap is a seat ticked mid-session —
+     * bundle content is written at spawn, so its skills arrive at that seat's
+     * NEXT start. Until then this types a skill name the seat cannot resolve,
+     * which fails visibly rather than running some other copy of the skill.
+     *
+     * The ticker, not the coin id or the project name: the skill re-resolves
+     * identity through CoinGecko's search itself, and a symbol is what the
+     * operator sees on the row they clicked.
+     */
+    const command = oneLine(`/${PLUGIN_ID}:crypto-research ${ticker}`);
+    handle.inject(command);
+
+    // inject returns undefined in every case, so this records that the request
+    // was MADE, never that it arrived. The UI says exactly that.
+    const requests = noteRequest(ticker);
+    host.log.info(`injected "${command}" into ${runner.name}`);
+    return { ok: true, session: runner.name, command, requests };
   });
 
   host.ipc.handle('watchList', () => ({ ok: true, watch: loadWatch() }));
@@ -424,4 +675,6 @@ module.exports.deactivate = () => {
 
 // Exported for the tests; not part of the plugin surface.
 module.exports._parseHeader = parseHeader;
-module.exports._buildIndex = (root) => buildIndex(root);
+module.exports._buildIndex = (root, watch) => buildIndex(root, watch);
+module.exports._dueReasonsFor = dueReasonsFor;
+module.exports._oneLine = oneLine;

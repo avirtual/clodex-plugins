@@ -101,6 +101,61 @@
   margin-bottom: 8px;
 }
 
+/* ------------------------------------------------------------------ re-run */
+
+.cr-rerun {
+  margin-bottom: 10px;
+}
+
+.cr-rerun-btn {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid var(--border, #253253);
+  color: var(--text, #c8d1e0);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.cr-rerun-btn:hover {
+  opacity: 1;
+  background: var(--sidebar-hover, #1a2744);
+}
+
+/* Something on disk says this one looks due — lit rather than merely present. */
+.cr-rerun-due {
+  opacity: 1;
+  border-color: rgba(230, 160, 90, 0.5);
+  color: rgb(232, 174, 112);
+}
+
+.cr-rerun-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: none;
+}
+
+/* Dashed, because it records a request that could not be confirmed delivered. */
+.cr-rerun-sent {
+  font-size: 11px;
+  padding: 5px 8px;
+  border: 1px dashed var(--border, #253253);
+  border-radius: 5px;
+  color: var(--text-dim, #949eb1);
+  cursor: help;
+}
+
+.cr-rerun-off {
+  font-size: 11px;
+  padding: 5px 8px;
+  color: var(--text-dim, #949eb1);
+  opacity: 0.55;
+  cursor: help;
+}
+
 .cr-loading, .cr-empty {
   color: var(--text-dim, #949eb1);
   padding: 10px 2px;

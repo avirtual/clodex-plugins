@@ -32,15 +32,19 @@ not `.md`.
   first, then the findings that back it.
 - **Document** — rendered markdown: headings, lists, blockquotes, fences, and
   the pipe tables the assessments use for catalysts.
+- **Re-assess** — a button above the run list that types
+  `/crypto-research:crypto-research <TICKER>` into this window's session. See
+  [Re-assess](#re-assess) below; it is the one control here that spends money.
 
 Score and conviction are pulled from the assessment header with loose patterns,
 because the corpus drifts between runs (`**Score: 41/100 | Conviction: medium**`
 and `**Score: 58/100 — conviction: LOW**` both parse). A header that does not
 parse yields a run card with no chips, never a missing run.
 
-**It never writes to the library.** Assessments are point-in-time documents —
-the rule is to write a new dated one rather than edit an old one — so there is
-no edit or delete path in the viewer.
+**The viewer itself never writes to the library.** Assessments are point-in-time
+documents — the rule is to write a new dated one rather than edit an old one —
+so there is no edit or delete path here. Re-assess is not an exception: it does
+not touch the library, it asks an agent to run the skill, and the agent writes.
 
 ## The price header
 
@@ -129,6 +133,45 @@ only removes the wait between opens.
 every installed plugin, and the second plugin to claim a name **does not load at
 all**. `watch` is exactly the name two authors pick independently.
 
+## Re-assess
+
+A button above the run list that types `/crypto-research:crypto-research
+<TICKER>` into **this window's active session**, as if you had typed it.
+
+It is deliberately small. `inject` is fire-and-forget: it returns nothing and
+cannot tell you whether the line was delivered, parked behind a mid-turn hold,
+or dropped into a seat that has since exited. Everything about the control is
+shaped by that one fact.
+
+- **Only this window's session.** Not a session picker. Choosing a seat for you
+  would mean guessing which agent should absorb an expensive run, and would
+  happily aim at another workspace — writing a `research/` folder into an
+  unrelated repo. The seat must be a live `claude` session whose own walk-up
+  finds *this* library; otherwise the button is replaced by `↻ re-run
+  unavailable` with the reason on hover. It is explained rather than hidden,
+  because a missing button with no reason reads as a broken plugin, and the
+  reason is usually one you fix by clicking a different session.
+- **A confirmation naming the exact line and the seat** that receives it.
+- **A 15-minute cooldown** replaces the button with `↻ requested 4m ago` — a
+  record of the request, never of the run, and the tooltip says so. It is
+  enforced in the engine, not just in the renderer: every window draws its own
+  button from its own last listing, so a second window still shows one after the
+  first has fired, and two clicks means two full research runs.
+- **Only tickers already in the library.** This is a re-run button, not a
+  "research anything" box, which keeps the injected text bounded by what the
+  directory walk actually found.
+
+The button lights up when something on disk says the ticker looks due: the
+newest assessment is 30+ days old (the same threshold as the `stale · Nd` chip),
+or a `[agent:cryptowatch]` item's date has arrived since that assessment was
+written. Those reasons are listed in the confirmation. **An unlit button is not
+"no reason to look"** — the triggers that matter most for a token, a depeg or an
+exploit or an unlock landing early, leave no trace in this directory at all.
+
+A run writes into `<TICKER>/<today>/`, so a second run on the same day
+overwrites that day's files rather than creating a second folder. The
+confirmation says so.
+
 ## Which folder it reads
 
 In order:
@@ -167,11 +210,13 @@ is written at spawn. Until that seat restarts, the skill name will not resolve.
 
 ### It spends money
 
-This is a viewer **and** a research pipeline. The viewer is read-only and free —
-the price header calls two public endpoints and nothing else. A research run
-spawns two or three researcher subagents plus an assessor: real tokens, several
-minutes. Nothing in the UI starts one; a run only ever begins because someone
-invoked the skill.
+This is a viewer **and** a research pipeline. Browsing is free — the price
+header calls two public endpoints and nothing else. A research run spawns two or
+three researcher subagents plus an assessor: real tokens, several minutes.
+
+Exactly one control starts one: **Re-assess**, behind a confirmation naming the
+line and the seat, and a 15-minute cooldown. Everything else in the UI displays
+work already paid for.
 
 ## Installing
 
@@ -212,7 +257,7 @@ three capability grants — it never reads turn text, thinking, or tool inputs.
 ## Shape
 
 - `engine.js` — root resolution, the directory walk, header parsing, file
-  reads, the watch list, and the verb. Every segment from the renderer or an
+  reads, the watch list, the verb, and the re-run guards. Every segment from the renderer or an
   agent is grammar-checked before it is joined to a path, and every read
   resolves symlinks at **each level** of the descent and prefix-checks the
   resolved string against the library root. A lexical `path.join` is defeated by
