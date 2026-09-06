@@ -1,13 +1,20 @@
 {
   "id": "crypto-research",
   "name": "Crypto Research",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "hostApi": "1",
   "entry": {
     "engine": "engine.js",
     "renderer": "renderer.js"
   },
   "style": "style.css",
+  "surfaces": {
+    "index": "any",
+    "doc": "any",
+    "quote": "any",
+    "rerun": "any",
+    "watchRemove": "any"
+  },
   "enabledByDefault": false,
   "announce": "Browse crypto research in a workspace: tickers, dated runs, the scored assessment and the findings behind it, with a live price header per ticker. Also carries the research pipeline itself — the /crypto-research:crypto-research skill, the two subagents it spawns, and an [agent:cryptowatch] verb for recording dated things to watch."
 }

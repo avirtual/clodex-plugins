@@ -1,7 +1,7 @@
 {
   "id": "intent-log",
   "name": "Intent Log",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "hostApi": "1",
   "scope": "session",
   "entry": {
@@ -9,6 +9,10 @@
     "renderer": "renderer.js"
   },
   "style": "style.css",
+  "surfaces": {
+    "recent": "any",
+    "clear": "any"
+  },
   "enabledByDefault": false,
   "announce": "A live feed of the [agent:…] intents every granted seat emits — timestamp, agent, verb, argument — in one window across all workspaces. In-memory only; nothing is written to disk."
 }

@@ -20,19 +20,28 @@ is where plugins come from and who is trusted to put them there.
 
 ## Installing one
 
-Today: clone this repo, then in Clodex use **Plugins ▸ Manage Plugins… ▸
-Register Plugin…** and pick the plugin's folder. It is linked into
-`~/.clodex/plugins/<id>` without copying; a `git pull` here updates it.
-
-Soon: **Install from GitHub…** in the same dialog, taking a source spec —
-`owner/repo`, `owner/repo@ref`, `owner/repo:sub/path`, `owner/repo@ref:sub/path`,
-or a `https://github.com/owner/repo/tree/<ref>/<path>` URL. Since every plugin
-here lives in its own top-level folder, the subpath is just the plugin's id:
+**Plugins ▸ Manage Plugins… ▸ Install from GitHub…**, and paste one of these.
+Every plugin here is a **subfolder** of one repo, so every spec needs a subpath —
+which is just the plugin's id:
 
 ```
-avirtual/clodex-plugins:review-kit                     # follows the default branch
+https://github.com/avirtual/clodex-plugins/tree/master/review-kit   # the URL, as copied from the browser
+avirtual/clodex-plugins:review-kit                     # short form, follows the default branch
+avirtual/clodex-plugins@master:review-kit              # short form, an explicit ref
 avirtual/clodex-plugins@review-kit-v0.1.0:review-kit   # frozen at that tag
 ```
+
+The grammar in one line: **`@` picks the ref, `:` picks the subfolder**, and the
+`/tree/<ref>/<subpath>` URL works verbatim — copy it out of the address bar. A
+spec with no subpath asks for a plugin at the repo root, and there isn't one
+here.
+
+Alternatively, clone this repo and use **Register Plugin…** to pick a folder. It
+is linked into `~/.clodex/plugins/<id>` without copying, so a `git pull` here
+updates it — the right choice while you are editing a plugin, since there is
+nothing to re-install. Note the two are exclusive: a registered symlink of some
+id **blocks** a GitHub install of that same id, which is reported as "not from a
+source".
 
 Installed plugins are pinned to a commit, land disabled until you enable them,
 and never update on their own.

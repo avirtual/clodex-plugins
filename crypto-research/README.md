@@ -237,9 +237,20 @@ Then two per-seat steps, both off by default and both deliberate:
 A renderer change needs an app restart (`require` caches by path); an engine
 change needs only a Re-scan.
 
-The renderer half is **desktop-only**. The browser bundle is built with the app
-and inlines only the repo's own plugins, so a registered external plugin gets
-its engine half on the web surface and no UI there.
+### In the browser
+
+The overlay works on the browser surface as well as the desktop app: a plugin
+outside the Clodex repo is not in the web bundle, so its renderer half is read
+from disk as source and evaluated in the page.
+
+What does **not** cross is the folder picker. `setRoot` takes a caller-supplied
+host path, so it is deliberately left out of the manifest's `surfaces` table and
+answers `plugin method not available on this surface` from the browser. Choose
+the library on the desktop; the browser reads it. The five methods the viewer
+needs — `index`, `doc`, `quote`, `rerun`, `watchRemove` — are marked `"any"`.
+
+Manifests are read at registration, so a browser box that predates this change
+needs a plugin re-scan or a restart before the calls stop being refused.
 
 ### Capability checks
 

@@ -8,6 +8,9 @@
     "renderer": "renderer.js"
   },
   "style": "style.css",
+  "surfaces": {
+    "greet": "any"
+  },
   "enabledByDefault": false,
   "announce": "One sentence: what this plugin does, shown in Manage Plugins."
 }

@@ -212,8 +212,12 @@ default on every seat, and reaches one only when that seat's Plugins list
 includes it (`⚙ session ▾ → 🔌 Plugins…`). Tick it on the stocks seats; leave
 it off everywhere else, which is the point of the default.
 
-The renderer half is desktop-only — registered external plugins get no UI on
-the web surface.
+The overlay works on the browser surface too: a plugin outside the Clodex repo
+is not in the web bundle, so its renderer half travels as source and is
+evaluated in the page. The folder picker is the exception — `setRoot` takes a
+caller-supplied host path, so it is left out of the manifest's `surfaces` table
+and is refused from the browser with `plugin method not available on this
+surface`. Choose the library on the desktop; the browser reads it.
 
 ### It spends money
 
