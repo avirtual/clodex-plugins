@@ -40,8 +40,9 @@ Alternatively, clone this repo and use **Register Plugin…** to pick a folder. 
 is linked into `~/.clodex/plugins/<id>` without copying, so a `git pull` here
 updates it — the right choice while you are editing a plugin, since there is
 nothing to re-install. Note the two are exclusive: a registered symlink of some
-id **blocks** a GitHub install of that same id, which is reported as "not from a
-source".
+id **blocks** a GitHub install of that same id, refused with
+
+> `"<id>" is a registered link, not a directory from a source — unregister it first.`
 
 Installed plugins are pinned to a commit, land disabled until you enable them,
 and never update on their own.
