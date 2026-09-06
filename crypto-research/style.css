@@ -1,0 +1,487 @@
+/*
+ * crypto-research — plugin stylesheet.
+ *
+ * TWO RULES THIS FILE OBEYS, both of which are invisible until broken:
+ *
+ * 1. It is injected VERBATIM AND UNSCOPED into every window. Every selector
+ *    here is prefixed `cr-`, or this restyles Clodex itself and every other
+ *    plugin.
+ * 2. Every colour is a theme variable. Clodex ships light themes (`light`,
+ *    `paper`) as well as dark ones, so a hardcoded hex that looks right while
+ *    building is unreadable for anyone on a light theme — and the author never
+ *    sees it, because the author is not on one.
+ *
+ * `.plugin-overlay` itself is never styled here: the host creates, toggles and
+ * removes it, so it is host contract rather than plugin skin. The host paints
+ * only a scrim; `.cr-modal` below is the panel.
+ */
+
+.cr-modal {
+  width: 100%;
+  max-width: 1280px;
+  height: 84vh;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  box-sizing: border-box;
+  background: var(--sidebar-bg, #16213e);
+  color: var(--text, #eee);
+  border: 1px solid var(--accent, #e94560);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+  font-size: 13px;
+}
+
+/* ------------------------------------------------------------------ topbar */
+
+.cr-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border, #253253);
+  flex: 0 0 auto;
+}
+
+.cr-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text, #eee);
+}
+
+.cr-rootlabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;      /* keep the tail of a long path visible */
+  text-align: left;
+}
+
+.cr-btn {
+  background: var(--bg, #1a1a2e);
+  color: var(--text, #eee);
+  border: 1px solid var(--border, #253253);
+  border-radius: 4px;
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.cr-btn:hover { background: var(--sidebar-hover, #1a2744); }
+
+/* -------------------------------------------------------------- three cols */
+
+.cr-body {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 10px;
+  min-height: 0;
+  padding-top: 10px;
+}
+
+.cr-col {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.cr-col-tickers { flex: 0 0 210px; }
+.cr-col-runs    { flex: 0 0 250px; border-left: 1px solid var(--border, #253253); border-right: 1px solid var(--border, #253253); padding: 0 10px; }
+.cr-col-doc     { flex: 1 1 auto; min-width: 0; }
+
+.cr-colhead {
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 8px;
+}
+
+.cr-loading, .cr-empty {
+  color: var(--text-dim, #949eb1);
+  padding: 10px 2px;
+  line-height: 1.5;
+}
+
+.cr-err {
+  color: var(--error, #e06c75);
+  padding: 10px 2px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ ticker */
+
+.cr-tick {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin-bottom: 3px;
+  cursor: pointer;
+  color: var(--text, #eee);
+  font-size: 13px;
+}
+
+.cr-tick:hover { background: var(--sidebar-hover, #1a2744); }
+
+.cr-tick.cr-on {
+  background: var(--sidebar-hover, #1a2744);
+  border-color: var(--accent, #e94560);
+}
+
+.cr-tick-1 { display: flex; align-items: center; gap: 6px; }
+.cr-tick-sym { font-weight: 600; }
+
+.cr-tick-2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.cr-tick-conv { text-transform: capitalize; }
+.cr-tick-runs { margin-left: auto; }
+
+.cr-delta { font-size: 11px; font-weight: 600; }
+
+/* ------------------------------------------------------------------- chips */
+
+.cr-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid var(--border, #253253);
+  color: var(--text-dim, #949eb1);
+  white-space: nowrap;
+}
+
+.cr-band-hi   { background: var(--ok, #98c379);    color: var(--bg, #1a1a2e); border-color: transparent; }
+.cr-band-mid  { background: var(--warn, #e5c07b);  color: var(--bg, #1a1a2e); border-color: transparent; }
+.cr-band-low  { background: var(--border, #253253); color: var(--text, #eee); border-color: transparent; }
+.cr-band-bad  { background: var(--error, #e06c75); color: var(--bg, #1a1a2e); border-color: transparent; }
+.cr-band-none { background: transparent; }
+
+.cr-chip-dim  { color: var(--text-dim, #949eb1); }
+.cr-chip-warn { color: var(--warn, #e5c07b);  border-color: var(--warn, #e5c07b); }
+.cr-chip-err  { color: var(--error, #e06c75); border-color: var(--error, #e06c75); }
+.cr-chip-act  { background: var(--accent, #e94560); color: var(--bg, #1a1a2e); border-color: transparent; }
+
+.cr-up   { color: var(--ok, #98c379); }
+.cr-down { color: var(--error, #e06c75); }
+.cr-flat { color: var(--text-dim, #949eb1); }
+
+/* --------------------------------------------------------------- run cards */
+
+.cr-run {
+  border: 1px solid var(--border, #253253);
+  border-radius: 4px;
+  padding: 7px 8px;
+  margin-bottom: 7px;
+}
+
+.cr-run-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 5px;
+}
+
+.cr-run-date { font-weight: 600; font-size: 12px; }
+
+.cr-doclink {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  padding: 3px 6px;
+  cursor: pointer;
+  color: var(--text-dim, #949eb1);
+  font-size: 12px;
+}
+
+.cr-doclink:hover { background: var(--sidebar-hover, #1a2744); color: var(--text, #eee); }
+.cr-doclink.cr-on { background: var(--active-bg, #0f3460); color: var(--text, #eee); }
+
+/* ------------------------------------------------------------ watch items */
+
+.cr-watchbox {
+  border: 1px solid var(--accent, #e94560);
+  border-radius: 4px;
+  padding: 7px 8px;
+  margin-bottom: 10px;
+}
+
+.cr-watchhead {
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 5px;
+}
+
+.cr-watch { margin-bottom: 6px; }
+.cr-watch:last-child { margin-bottom: 0; }
+
+.cr-watch-top { display: flex; align-items: center; gap: 6px; }
+.cr-watch-by { color: var(--text-dim, #949eb1); font-size: 10px; }
+
+.cr-watch-note {
+  color: var(--text, #eee);
+  font-size: 12px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.cr-x {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-dim, #949eb1);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.cr-x:hover { color: var(--error, #e06c75); }
+
+/* ------------------------------------------------------------ quote header */
+
+.cr-quote {
+  border: 1px solid var(--border, #253253);
+  border-radius: 4px;
+  padding: 9px 11px;
+  margin-bottom: 4px;
+}
+
+.cr-quote-loading { color: var(--text-dim, #949eb1); }
+
+.cr-quote-failed { display: flex; align-items: center; gap: 8px; }
+.cr-quote-why { color: var(--text-dim, #949eb1); font-size: 11px; }
+
+.cr-quote-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.cr-quote-price { font-size: 20px; font-weight: 600; }
+
+.cr-quote-changes { display: flex; gap: 10px; }
+.cr-quote-chg { font-size: 12px; font-weight: 600; }
+.cr-quote-chglab { color: var(--text-dim, #949eb1); font-weight: 400; margin-right: 3px; }
+
+.cr-quote-stamp {
+  margin-left: auto;
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+}
+
+.cr-warn { color: var(--warn, #e5c07b); }
+
+.cr-guess {
+  margin-top: 7px;
+  font-size: 11px;
+  color: var(--text-dim, #949eb1);
+  line-height: 1.5;
+}
+
+.cr-guess-alt { color: var(--text-dim, #949eb1); }
+
+.cr-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 9px;
+}
+
+.cr-stat-k {
+  color: var(--text-dim, #949eb1);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cr-stat-v { font-size: 13px; }
+
+/* ------------------------------------------------------------------ chart */
+
+.cr-ranges { display: flex; gap: 5px; margin-top: 9px; }
+
+.cr-range {
+  background: transparent;
+  border: 1px solid var(--border, #253253);
+  border-radius: 3px;
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.cr-range:hover { background: var(--sidebar-hover, #1a2744); }
+
+.cr-range-on {
+  border-color: var(--accent, #e94560);
+  color: var(--text, #eee);
+}
+
+.cr-chart { margin-top: 7px; }
+.cr-chart-empty { color: var(--text-dim, #949eb1); font-size: 11px; }
+
+.cr-chart-plot { position: relative; height: 90px; }
+
+.cr-chart-svg { width: 100%; height: 100%; display: block; }
+
+/* The viewBox is stretched to fit any width, so strokes must not scale with it. */
+.cr-chart-line {
+  fill: none;
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.cr-up-stroke   { stroke: var(--ok, #98c379); }
+.cr-down-stroke { stroke: var(--error, #e06c75); }
+
+.cr-chart-base {
+  stroke: var(--border, #253253);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  vector-effect: non-scaling-stroke;
+}
+
+/* Labels are HTML over the plot, never text inside the stretched SVG. */
+.cr-chart-hi, .cr-chart-lo {
+  position: absolute;
+  right: 2px;
+  font-size: 10px;
+  color: var(--text-dim, #949eb1);
+  background: var(--sidebar-bg, #16213e);
+  padding: 0 3px;
+  pointer-events: none;
+}
+
+.cr-chart-hi { top: 0; }
+.cr-chart-lo { bottom: 0; }
+
+.cr-chart-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-dim, #949eb1);
+  margin-top: 3px;
+}
+
+.cr-chart-move { font-weight: 600; }
+
+/* -------------------------------------------------------------- documents */
+
+.cr-docnote {
+  color: var(--text-dim, #949eb1);
+  font-size: 10px;
+  font-style: italic;
+  margin: 0 0 8px 2px;
+}
+
+.cr-doc {
+  line-height: 1.55;
+  padding-right: 6px;
+}
+
+.cr-h {
+  color: var(--text, #eee);
+  margin: 15px 0 7px;
+  font-size: 14px;
+  border-bottom: 1px solid var(--border, #253253);
+  padding-bottom: 3px;
+}
+
+.cr-doc h2.cr-h { font-size: 15px; }
+.cr-doc h5.cr-h, .cr-doc h6.cr-h { font-size: 12px; border-bottom: none; }
+
+.cr-p { margin: 7px 0; }
+
+.cr-list { margin: 7px 0; padding-left: 20px; }
+.cr-list li { margin: 3px 0; }
+
+.cr-quote-block, .cr-quote + blockquote, blockquote.cr-quote {
+  border-left: 2px solid var(--accent, #e94560);
+  margin: 9px 0;
+  padding: 2px 0 2px 10px;
+  color: var(--text-dim, #949eb1);
+}
+
+.cr-pre {
+  background: var(--bg, #1a1a2e);
+  border: 1px solid var(--border, #253253);
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+  margin: 9px 0;
+}
+
+.cr-code {
+  background: var(--bg, #1a1a2e);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: 12px;
+}
+
+.cr-hr {
+  border: none;
+  border-top: 1px solid var(--border, #253253);
+  margin: 14px 0;
+}
+
+.cr-table {
+  border-collapse: collapse;
+  margin: 9px 0;
+  font-size: 12px;
+  width: 100%;
+}
+
+.cr-table th, .cr-table td {
+  border: 1px solid var(--border, #253253);
+  padding: 4px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.cr-table th {
+  background: var(--bg, #1a1a2e);
+  color: var(--text-dim, #949eb1);
+  font-weight: 600;
+}
+
+.cr-linktext { color: var(--text, #eee); }
+.cr-linkurl  { color: var(--text-dim, #949eb1); font-size: 11px; word-break: break-all; }
+
+/* --------------------------------------------------------------- settings */
+
+.cr-set-note {
+  color: var(--text-dim, #949eb1);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 6px;
+}
+
+.cr-set-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--bg, #1a1a2e);
+  color: var(--text, #eee);
+  border: 1px solid var(--border, #253253);
+  border-radius: 4px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
