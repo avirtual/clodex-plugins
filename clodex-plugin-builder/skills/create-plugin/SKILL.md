@@ -108,7 +108,7 @@ has nothing to draw *from*.
   "entry": { "engine": "engine.js", "renderer": "renderer.js" },
   "style": "style.css",
   "enabledByDefault": false,
-  "announce": "One sentence, shown in Manage Plugins."
+  "announce": "One sentence. Shown in Manage Plugins AND as the skill's description in Claude Code."
 }
 ```
 
@@ -125,6 +125,15 @@ Rules that refuse a manifest outright, so get them right first:
   grant (today: the turn-text feed). It no longer controls visibility — a seat's
   plugin list does that.
 - Entry and `style` paths must stay inside the plugin folder.
+- **`announce` and `version` are read twice.** If the plugin ships a `skills/` or
+  `agents/` bundle, Clodex generates a `.claude-plugin/plugin.json` for it and
+  stamps `announce` in as the `description` and `version` as the version — that
+  is the line the agent's own `/skills` listing shows. Omit `announce` and the
+  bundle falls back to `Clodex plugin <name>`; omit `version` and it reads
+  `0.0.0`. So write `announce` as a sentence that survives being read next to a
+  skill name, not only in a plugin manager. (Older builds hardcoded a generic
+  description here regardless of the manifest; a bundle that still reads
+  "clodex session-injected skills" means the host predates the fix.)
 
 ## Step 3 — write the halves
 
