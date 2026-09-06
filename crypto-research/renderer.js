@@ -285,12 +285,35 @@ module.exports.activate = (rhost) => {
 
   let torn = false;
   let refresh = null;   // assigned by mount; the host always mounts before onOpen
+  let isOpen = false;
 
   const surface = rhost.ui.surfaces.overlay({
     id: 'main',
     mount(rootEl) { refresh = wire(rootEl); },
-    onOpen() { if (refresh) refresh(); },
+    onOpen() { isOpen = true; if (refresh) refresh(); },
+    onClose() { isOpen = false; },
   });
+
+  /*
+   * The engine emits `watch-changed` when an agent records a watch item through
+   * [agent:cryptowatch]. Without this, an overlay left open while an agent
+   * worked would keep showing the list as it was at open time.
+   *
+   * This does NOT replace the pull on open, it only removes the wait between
+   * opens: events are unbuffered, so a window closed at emit time hears nothing,
+   * ever. The payload is deliberately null — the emit is an invalidation hint on
+   * `'all'`, and we re-pull rather than trusting anything carried across.
+   *
+   * Feature-checked at the point of use: a host without events.on loses live
+   * refresh, not the viewer.
+   */
+  let offEvent = null;
+  if (rhost.events && typeof rhost.events.on === 'function') {
+    offEvent = rhost.events.on('watch-changed', () => {
+      if (torn || !isOpen || !refresh) return;
+      refresh();
+    });
+  }
 
   function wire(rootEl) {
     rootEl.innerHTML = '';
@@ -454,7 +477,22 @@ module.exports.activate = (rhost) => {
         docBox.appendChild(el('div', 'cr-err', (res && res.error) || 'could not read that file'));
         return;
       }
-      docBox.appendChild(renderMarkdown(res.text));
+
+      /*
+       * Prefer the host's renderer. It embodies the same rule as ours — build
+       * nodes, never innerHTML — but it is the pinned, maintained copy: it caps
+       * blockquote nesting so hostile input cannot overflow the stack, refuses
+       * images outright (an <img src> is a network fetch on untrusted input),
+       * and admits an anchor only for http/https. Ours is the fallback for a
+       * host that does not carry it, not a preference.
+       */
+      if (rhost.lib && typeof rhost.lib.renderMarkdown === 'function') {
+        docBox.classList.add('cr-doc-host');
+        docBox.appendChild(rhost.lib.renderMarkdown(res.text));
+      } else {
+        docBox.classList.remove('cr-doc-host');
+        docBox.appendChild(renderMarkdown(res.text));
+      }
     }
 
     /* ------------------------------------------------------------ runs --- */
@@ -660,7 +698,10 @@ module.exports.activate = (rhost) => {
     },
   });
 
-  return () => { torn = true; };
+  return () => {
+    torn = true;
+    if (offEvent) { try { offEvent(); } catch { /* already released */ } }
+  };
 };
 
 // Exported for the tests; not part of the plugin surface.

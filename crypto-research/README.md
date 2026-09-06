@@ -112,6 +112,12 @@ chip, past-due ones go dim. They are stored engine-side in
 `<userData>/plugins/crypto-research/state.json`, capped at 200, and removed with
 the `×` in the UI.
 
+An overlay that is already open refreshes when an agent records one — the engine
+emits an invalidation hint and the overlay re-pulls. The hint carries no data,
+because it goes to every workspace. This does not replace the pull on open:
+events are unbuffered, so a window closed at that moment hears nothing ever; it
+only removes the wait between opens.
+
 > **The verb is off on every seat until you tick it**, under the seat's Intents
 > list. Plugin verbs are always privileged — there is no way to ship one enabled
 > by default. **The failure when it is not ticked is silent**: the line is not
@@ -213,10 +219,14 @@ three capability grants — it never reads turn text, thinking, or tool inputs.
   a symlink inside the tree pointing out of it: the joined string stays under
   the root and the open does not.
 - `renderer.js` — the overlay, the footer button, the settings section, the
-  chart, and a markdown renderer that builds DOM nodes and sets every leaf
-  through `textContent`. These documents are model-written prose; none of it
-  becomes markup, and a link renders as text plus a bare URL rather than as an
-  anchor.
+  chart, and the document pane. These documents are model-written prose, so
+  none of it becomes markup: rendering goes through `rhost.lib.renderMarkdown`,
+  the host's pinned renderer, which never emits raw HTML, supports no images
+  at all (an `<img src>` is a network fetch on untrusted input), caps
+  blockquote nesting against stack overflow, and admits an anchor only for
+  `http`/`https`. A hand-rolled renderer is kept as the fallback for a host
+  without it — it builds nodes and sets every leaf through `textContent`, and
+  renders links as text plus a bare URL rather than as anchors.
 - `market.js` — the only part that reaches the network. Plain Node `fetch`, no
   dependency, hard timeout, response cap, and single-flight per URL. Every
   failure returns a result rather than throwing, because an unreachable quote
