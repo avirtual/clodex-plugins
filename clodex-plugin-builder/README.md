@@ -59,7 +59,7 @@ Otherwise, **Plugins ▸ Manage Plugins… ▸ Install from GitHub…**:
 ```
 https://github.com/avirtual/clodex-plugins/tree/master/clodex-plugin-builder
 avirtual/clodex-plugins:clodex-plugin-builder                                # follows the branch
-avirtual/clodex-plugins@clodex-plugin-builder-v0.2.0:clodex-plugin-builder   # frozen
+avirtual/clodex-plugins@clodex-plugin-builder-v0.2.1:clodex-plugin-builder   # frozen
 ```
 
 `@` picks the ref and `:` picks the subfolder; the subpath is required, since

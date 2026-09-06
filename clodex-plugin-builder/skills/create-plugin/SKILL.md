@@ -9,15 +9,16 @@ contract, and where they disagree the contract wins.
 
 ## Step 0 — find the contract
 
-The full contract ships **inside the app you are running**. Find it once:
+A Clodex **checkout** carries the contract. The installed app does not give you
+one you can read: its copy is inside the app archive, which your shell cannot
+list. So look for a checkout first:
 
 ```bash
-ls "$(dirname "$(readlink -f /Applications/Clodex.app/Contents/MacOS/Clodex 2>/dev/null)")" 2>/dev/null
 find ~/projects /Applications -maxdepth 4 -name plugin-api.md -path '*plugins*' 2>/dev/null | head -3
 ```
 
-If you find a Clodex **checkout**, it also carries the author tools, and they
-are the fastest path by a wide margin:
+A checkout also carries the author tools, and they are the fastest path by a
+wide margin:
 
 ```bash
 node plugins/tools/build-context.js /tmp/plugin-context.md   # the full pack
@@ -26,11 +27,10 @@ node plugins/tools/verify.js <dir>                           # run it against th
 ```
 
 **If `verify.js` exists, you must use it** — it loads the plugin through the
-host's own loader, so it catches what reading cannot. If you find no checkout,
-work from `plugin-api.md` alone and say in your final message that the plugin is
-unverified.
+host's own loader, so it catches what reading cannot.
 
-With no local copy at all, fetch the four docs from the public repo:
+With no checkout, fetch the four docs from the public repo, and say in your
+final message that the plugin is unverified — nothing ran it:
 
 ```
 https://raw.githubusercontent.com/avirtual/clodex/master/plugins/plugin-api.md

@@ -30,9 +30,12 @@ Plugins version themselves; the app's version is not theirs.
   ref the plugin was installed from and compares commits, so bumping `version`
   is not what makes an update appear — pushing is. Bump it anyway: it is what a
   human reads, and it decides which copy wins when two roots hold the same id.
-- Because this is one repo, a push touching any plugin can make every plugin
-  installed from that branch report an update. Re-installing the unchanged ones
-  fetches identical bytes; it is noise, not breakage.
+- **A push touching one plugin does not make the others report an update**, even
+  though they share a repo and therefore a commit. An update counts only when the
+  commit differs *and* the fetched subfolder differs byte-for-byte from the
+  installed one, so a plugin whose folder nobody touched resolves to "up to
+  date". Worth knowing when you are reasoning about it: the commit alone would be
+  the wrong test in a monorepo, and it is not the test used.
 
 ## Depending on a host capability
 
