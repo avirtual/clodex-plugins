@@ -1,0 +1,698 @@
+/*
+ * stock-assessments. Plugin CSS is injected verbatim and unscoped, so every
+ * selector here is an `sa-`-prefixed class this plugin puts on its own
+ * elements — nothing that can match core's DOM or another plugin's.
+ */
+
+.sa-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(1180px, 95vw);
+  height: min(760px, 88vh);
+  margin: 5vh auto 0;
+  background: var(--bg, #1e1e1e);
+  color: inherit;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.sa-topbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+}
+
+.sa-title {
+  font-weight: 600;
+}
+
+/* Takes the auto margin so the buttons group at the right edge, and truncates
+   rather than pushing them off: a long root path is context, not the point. */
+.sa-rootlabel {
+  flex: 1;
+  min-width: 0;
+  margin-left: 4px;
+  opacity: 0.5;
+  font-size: 0.8em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;             /* keep the tail of the path visible */
+  text-align: left;
+}
+
+.sa-btn {
+  background: none;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  color: inherit;
+  border-radius: 5px;
+  padding: 3px 9px;
+  font-size: 0.82em;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.sa-btn:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.14);
+}
+
+.sa-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.sa-close:hover {
+  opacity: 1;
+}
+
+.sa-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* --- ticker pane --- */
+
+.sa-tickers {
+  width: 190px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid rgba(128, 128, 128, 0.25);
+  padding: 6px 0;
+}
+
+.sa-trow {
+  padding: 7px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+
+.sa-trow:hover {
+  background: rgba(128, 128, 128, 0.1);
+}
+
+.sa-trow.sa-selected {
+  background: rgba(128, 128, 128, 0.18);
+  border-left-color: rgba(140, 170, 255, 0.8);
+}
+
+.sa-tmain {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.sa-tname {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.sa-tmeta {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 2px;
+  font-size: 0.76em;
+  opacity: 0.55;
+}
+
+.sa-tdate {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* --- score / conviction chips --- */
+
+.sa-score {
+  font-size: 0.75em;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* Three bands, not a gradient: the corpus scores 34-70 and the useful question
+   is which side of "interesting" a run landed on, not its exact hue. */
+.sa-score-hi {
+  background: rgba(76, 175, 80, 0.2);
+  color: rgb(126, 217, 130);
+}
+
+.sa-score-mid {
+  background: rgba(212, 175, 55, 0.18);
+  color: rgb(219, 190, 106);
+}
+
+.sa-score-lo {
+  background: rgba(255, 120, 120, 0.16);
+  color: rgb(240, 145, 145);
+}
+
+.sa-score-none {
+  background: rgba(128, 128, 128, 0.18);
+  opacity: 0.7;
+}
+
+.sa-conv {
+  font-size: 0.75em;
+  opacity: 0.65;
+  text-transform: lowercase;
+}
+
+.sa-trend {
+  font-size: 0.7em;
+  font-weight: 600;
+}
+
+.sa-trend-up {
+  color: rgb(126, 217, 130);
+}
+
+.sa-trend-dn {
+  color: rgb(240, 145, 145);
+}
+
+/* --- run pane --- */
+
+.sa-runs {
+  width: 240px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid rgba(128, 128, 128, 0.25);
+  padding: 10px 12px;
+}
+
+.sa-runhdr {
+  margin-bottom: 10px;
+}
+
+.sa-runticker {
+  font-weight: 600;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.sa-runcompany {
+  font-size: 0.8em;
+  opacity: 0.55;
+  margin-top: 1px;
+}
+
+.sa-run {
+  border: 1px solid rgba(128, 128, 128, 0.22);
+  border-radius: 6px;
+  padding: 8px 9px;
+  margin-bottom: 9px;
+}
+
+.sa-runhead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 7px;
+}
+
+.sa-rundate {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.sa-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.sa-docbtn {
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  opacity: 0.65;
+  font-size: 0.82em;
+  padding: 3px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.sa-docbtn:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.14);
+}
+
+/* The assessment is the document; the findings files are its evidence. */
+.sa-docbtn-main {
+  opacity: 0.95;
+  font-weight: 600;
+}
+
+.sa-docbtn.sa-selected {
+  opacity: 1;
+  background: rgba(140, 170, 255, 0.18);
+}
+
+/* --- document pane --- */
+
+.sa-doc {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The quote header sits above the document and does not scroll with it; only
+   .sa-docscroll inside .sa-docinner scrolls. */
+.sa-quotehost { flex: 0 0 auto; }
+
+.sa-docinner {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.sa-docbar {
+  padding: 7px 16px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.2);
+  font-size: 0.76em;
+  opacity: 0.5;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sa-docscroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 22px 28px;
+}
+
+/* --- markdown --- */
+
+.sa-md {
+  font-size: 0.92em;
+  line-height: 1.55;
+  /* A measure cap: these documents are dense prose and full-width lines at
+     1180px are genuinely hard to read. */
+  max-width: 74ch;
+}
+
+.sa-h {
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 1.3em 0 0.45em;
+}
+
+.sa-h1 {
+  font-size: 1.25em;
+  margin-top: 0.9em;
+}
+
+.sa-h2 {
+  font-size: 1.08em;
+  padding-bottom: 3px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.22);
+}
+
+.sa-h3 {
+  font-size: 0.98em;
+  opacity: 0.9;
+}
+
+.sa-p {
+  margin: 0.65em 0;
+}
+
+.sa-list {
+  margin: 0.55em 0;
+  padding-left: 1.35em;
+}
+
+.sa-list li {
+  margin: 0.35em 0;
+}
+
+.sa-quote {
+  margin: 0.7em 0;
+  padding: 2px 0 2px 12px;
+  border-left: 2px solid rgba(128, 128, 128, 0.4);
+  opacity: 0.85;
+}
+
+.sa-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.9em;
+  background: rgba(128, 128, 128, 0.16);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
+.sa-pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 5px;
+  padding: 9px 11px;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* A source link, shown as text with its URL on hover — see renderer.js for why
+   this is not an anchor. */
+.sa-link {
+  color: rgb(140, 170, 255);
+  border-bottom: 1px dotted rgba(140, 170, 255, 0.45);
+  cursor: help;
+}
+
+.sa-table {
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.88em;
+  /* Financial tables run wider than the prose measure; let them. */
+  max-width: none;
+}
+
+.sa-table th,
+.sa-table td {
+  border: 1px solid rgba(128, 128, 128, 0.28);
+  padding: 4px 9px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.sa-table th {
+  background: rgba(128, 128, 128, 0.12);
+  font-weight: 600;
+}
+
+.sa-md hr {
+  border: none;
+  border-top: 1px solid rgba(128, 128, 128, 0.25);
+  margin: 1.3em 0;
+}
+
+/* --- empty / error states --- */
+
+.sa-empty {
+  opacity: 0.6;
+  padding: 14px;
+  font-size: 0.88em;
+}
+
+.sa-hint {
+  margin-top: 8px;
+  opacity: 0.75;
+  font-size: 0.92em;
+  line-height: 1.5;
+}
+
+/* --- settings section --- */
+
+.sa-set-note {
+  margin: 0 0 8px;
+  opacity: 0.65;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+.sa-set-input,
+.sa-set-contact {
+  width: 100%;
+  box-sizing: border-box;
+  background: rgba(128, 128, 128, 0.12);
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 5px;
+  color: inherit;
+  padding: 5px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+}
+
+/* --- staleness ---
+   Two of the workspace's four re-assessment triggers are computable from disk;
+   these chips are a prompt to look, deliberately not styled as an alarm. */
+
+.sa-due {
+  margin-top: 3px;
+}
+
+.sa-due-chip {
+  font-size: 0.7em;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(230, 160, 90, 0.18);
+  color: rgb(232, 174, 112);
+}
+
+.sa-due-soon {
+  font-size: 0.7em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(128, 128, 128, 0.16);
+  opacity: 0.75;
+}
+
+/* --- re-run --- */
+
+.sa-rerun {
+  margin-top: 8px;
+}
+
+.sa-rerun-btn {
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  color: inherit;
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 0.78em;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.sa-rerun-btn:hover {
+  opacity: 1;
+  background: rgba(128, 128, 128, 0.14);
+}
+
+/* Lit only when something on disk says this ticker is due — the button exists
+   either way, so the highlight carries the recommendation, not the capability. */
+.sa-rerun-due {
+  opacity: 1;
+  border-color: rgba(230, 160, 90, 0.5);
+  color: rgb(232, 174, 112);
+}
+
+.sa-rerun-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  background: none;
+}
+
+/* A request that cannot be confirmed delivered. Replaces the button rather
+   than disabling it: a greyed button says "wait" without saying what for. */
+.sa-rerun-sent {
+  font-size: 0.75em;
+  padding: 4px 8px;
+  border: 1px dashed rgba(128, 128, 128, 0.4);
+  border-radius: 5px;
+  opacity: 0.7;
+  cursor: help;
+}
+
+.sa-rerun-off {
+  font-size: 0.75em;
+  padding: 4px 8px;
+  opacity: 0.4;
+  cursor: help;
+}
+
+/* --- quote header ---------------------------------------------------------
+   Prefixed .sa- like everything else here: this stylesheet is injected
+   unscoped into every window, so an unprefixed .quote would restyle the app. */
+
+.sa-qbox {
+  padding: 10px 22px 12px;
+  border-bottom: 1px solid var(--border, #2a3142);
+  background: var(--bg, #10141c);
+}
+
+.sa-qloading,
+.sa-qerr {
+  font-size: 12px;
+  color: var(--text-dim, #949eb1);
+  padding: 6px 0;
+}
+.sa-qerr { color: var(--warn, #d9a441); }
+
+.sa-qtop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sa-qpricewrap { display: flex; align-items: baseline; gap: 8px; }
+.sa-qprice { font-size: 26px; font-weight: 600; color: var(--text, #e6e9ef); }
+.sa-qchg { font-size: 13px; font-weight: 500; }
+.sa-qchg.sa-up { color: var(--ok, #4caf7d); }
+.sa-qchg.sa-down { color: var(--error, #e0554f); }
+
+.sa-qranges { display: flex; gap: 2px; }
+.sa-qrange {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-dim, #949eb1);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 7px;
+}
+.sa-qrange:hover { background: var(--sidebar-hover, #1b2130); }
+.sa-qrange-on {
+  border-color: var(--accent, #6f8fd6);
+  color: var(--text, #e6e9ef);
+}
+
+/* The chart wrapper is the positioning context for every label; the SVG
+   stretches, the labels must not. */
+.sa-chart {
+  margin: 10px 0 4px;
+  cursor: crosshair;
+}
+
+.sa-chart-plot { position: relative; }
+
+.sa-spark { width: 100%; height: 60px; display: block; }
+.sa-spark-line { fill: none; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.sa-spark-line.sa-up { stroke: var(--ok, #4caf7d); }
+.sa-spark-line.sa-down { stroke: var(--error, #e0554f); }
+.sa-spark-fill { stroke: none; opacity: 0.13; }
+.sa-spark-fill.sa-up { fill: var(--ok, #4caf7d); }
+.sa-spark-fill.sa-down { fill: var(--error, #e0554f); }
+
+.sa-52 { display: flex; align-items: center; gap: 8px; margin: 6px 0 10px; }
+.sa-52end { font-size: 10px; color: var(--text-dim, #949eb1); }
+.sa-52track {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--border, #2a3142);
+}
+.sa-52dot {
+  position: absolute;
+  top: -3px;
+  width: 3px;
+  height: 9px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--accent, #6f8fd6);
+}
+
+.sa-qstats { display: flex; flex-wrap: wrap; gap: 6px 26px; }
+.sa-qstat { display: flex; gap: 6px; font-size: 11px; }
+.sa-qstatk { color: var(--text-dim, #949eb1); }
+.sa-qstatv { color: var(--text, #e6e9ef); }
+
+.sa-qfoot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 8px;
+  font-size: 10px;
+  color: var(--text-dim, #949eb1);
+}
+.sa-qfoot.sa-qstale .sa-qasof { color: var(--warn, #d9a441); }
+.sa-qhint { opacity: 0.75; font-style: italic; }
+
+.sa-spark-base {
+  stroke: var(--text-dim, #949eb1);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.35;
+  vector-effect: non-scaling-stroke;
+}
+
+.sa-spark-cursor {
+  stroke: var(--text-dim, #949eb1);
+  stroke-width: 1;
+  opacity: 0.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.sa-chart-hi,
+.sa-chart-lo,
+.sa-chart-open {
+  position: absolute;
+  left: 0;
+  font-size: 9.5px;
+  color: var(--text-dim, #949eb1);
+  pointer-events: none;
+  background: var(--bg, #10141c);
+  padding-right: 4px;
+}
+.sa-chart-hi { top: -2px; }
+.sa-chart-lo { bottom: 0; }
+.sa-chart-open {
+  right: 0;
+  left: auto;
+  transform: translateY(-50%);
+  padding: 0 0 0 4px;
+  opacity: 0.8;
+}
+
+.sa-chart-dates {
+  display: flex;
+  justify-content: space-between;
+  font-size: 9.5px;
+  color: var(--text-dim, #949eb1);
+  opacity: 0.8;
+  pointer-events: none;
+}
+
+/* The readout replaces nothing when idle — it holds its own height so the
+   panel does not jump as the cursor enters and leaves the plot. */
+.sa-chart-read {
+  position: absolute;
+  top: -3px;
+  right: 0;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--sidebar-bg, #151a24);
+  border: 1px solid var(--border, #2a3142);
+  opacity: 0;
+  transition: opacity 90ms ease;
+  pointer-events: none;
+}
+.sa-chart-read.sa-on { opacity: 1; }
+.sa-chart-readd { color: var(--text-dim, #949eb1); }
+.sa-chart-readp { color: var(--text, #e6e9ef); font-weight: 600; }
+.sa-chart-readc.sa-up { color: var(--ok, #4caf7d); }
+.sa-chart-readc.sa-down { color: var(--error, #e0554f); }
+
+.sa-chart-dot {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  margin: -3.5px 0 0 -3.5px;
+  border-radius: 50%;
+  background: var(--bg, #10141c);
+  border: 2px solid var(--accent, #6f8fd6);
+  pointer-events: none;
+}

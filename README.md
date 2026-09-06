@@ -62,6 +62,7 @@ to judge.
 | [`clodex-plugin-builder`](clodex-plugin-builder/) | **Start here.** Content only. `/clodex-plugin-builder:create-plugin` scaffolds a plugin, wires the surfaces you asked for and verifies it against the real loader; an `api-scout` subagent answers contract questions so the contract stays out of your context. |
 | [`review-kit`](review-kit/) | Content only. `/review-kit:review` fans a change out to three focused reviewer subagents and consolidates one ranked report. No code — the whole plugin is four Markdown files and a manifest. |
 | [`intent-log`](intent-log/) | A live feed of the `[agent:…]` intents every granted seat emits — time, agent, verb, argument — in one window across workspaces. In-memory only; writes nothing. |
+| [`stock-assessments`](stock-assessments/) | **A worked example of a full plugin**, both halves plus a content bundle: a viewer for dated equity-research documents with a live quote header, and the research pipeline that produces them. Built against a real corpus rather than a demo, so it shows what the shapes here look like at size. Note the two asymmetries it carries — it calls a public HTTP endpoint, and its re-assess button spends tokens. |
 
 `_template/` is a starting point for a new one — copy it, rename the folder to
 your id, fill in the manifest. Or register `clodex-plugin-builder` and let

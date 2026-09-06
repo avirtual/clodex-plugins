@@ -69,3 +69,38 @@ writes on disk. Two more when they apply:
 - **If it needs a per-session grant** — `turns` for the agent-text feed, and the
   `scope: "session"` manifest field that feed also requires — say which, and that
   the plugin receives nothing at all until it is granted.
+- **If it costs the operator money**, say so under its own heading. A plugin that
+  can spawn subagents or start a long run is spending real tokens, and a stranger
+  who installed it for one feature should not discover the other by clicking it.
+
+## Reaching a network service
+
+The contract's advice is to shell out to a CLI the operator has already
+authenticated (`gh`, `kubectl`), because then the CLI holds the token and the
+plugin holds none. **That reasoning is about credentials.** For a keyless public
+endpoint there is no credential to misplace, so a direct `fetch` from the engine
+half is fine and does not need a CLI wrapped around it to launder it.
+
+What such a plugin owes its user instead:
+
+- **A hard timeout and a response size cap.** An engine half runs in the app's
+  process; a hung or unbounded read is the app's problem, not just yours.
+- **A User-Agent that identifies the plugin, not the operator.** If a service
+  wants a contact address, take it from a setting the operator typed themselves
+  and leave it blank until they do. Never send an identity they did not enter.
+- **Degrade to the last good value, or to nothing.** Undocumented endpoints break
+  without notice. Decide now what the surface shows when it does, and say so in
+  the README — "when this breaks, this is what you see" is the difference between
+  a known limit and a bug report.
+- **Say in the README that it makes the call, and to where.** Someone installing
+  a viewer is entitled to know it talks to the network.
+
+`stock-assessments` is the worked example of all four.
+
+## `enabledByDefault`
+
+Ship `false` unless the plugin is inert until deliberately used. It is a shared
+collection: a plugin that switches itself on across every seat of a repo the
+operator registered for one other plugin has made a choice that was theirs. Both
+`true` cases are narrow — a plugin with no side effects and no cost, or one the
+operator installed for exactly that purpose.

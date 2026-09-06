@@ -1,0 +1,13 @@
+{
+  "id": "stock-assessments",
+  "name": "Stock Assessments",
+  "version": "0.3.0",
+  "hostApi": "1",
+  "entry": {
+    "engine": "engine.js",
+    "renderer": "renderer.js"
+  },
+  "style": "style.css",
+  "enabledByDefault": false,
+  "announce": "Browse past equity research in a stocks workspace: tickers, dated runs, the scored assessment and the researcher findings behind it, with a live market quote header per ticker. Also carries the research pipeline itself — the /stock-assessments:stock-research skill and the two subagents it spawns."
+}
