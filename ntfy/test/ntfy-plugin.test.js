@@ -14,6 +14,19 @@
 // unset; the token string in no log line). An absence is true of a request that
 // was never made, so both token tests also assert the request ARRIVED — see the
 // `ENTER:` notes there.
+//
+// ── res.flushHeaders() IS LOAD-BEARING IN EVERY FIXTURE HERE ────────────────
+// Node does not send response headers when you call writeHead(); it holds them
+// until the first body write. A fixture that writeHead()s and then holds the
+// connection open — which is exactly what a healthy ntfy stream with no messages
+// yet looks like — is therefore INDISTINGUISHABLE ON THE WIRE from the
+// buffering proxy this plugin now detects, and the plugin will correctly time it
+// out. That cost a green "working server" test that was silently timing out.
+//
+// So: any fixture standing in for a WORKING server must call flushHeaders()
+// after writeHead(). Any fixture standing in for a buffering proxy must call
+// neither. That one line is the whole difference between the two, here and in
+// the real nginx.
 
 // FINDING A HOST ENGINE. This repo is not the Clodex repo, so
 // `plugin-host-engine.js` is not a sibling — it lives in a Clodex CHECKOUT,
@@ -79,12 +92,7 @@ function ntfyServer() {
       auth: req.headers.authorization,
     });
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
-    // Node holds headers back until the first body write, so writeHead() alone
-    // makes this fixture indistinguishable from the buffering proxy below — a
-    // WORKING server flushes them immediately, which is exactly the difference
-    // the header timeout keys on. Without this the plugin's stream to a healthy
-    // server that simply has no messages yet would time out.
-    res.flushHeaders();
+    res.flushHeaders();   // load-bearing — see the header of this file
     state.streams.push(res);
     res.on('close', () => { state.closes += 1; });
   });
