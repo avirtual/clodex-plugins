@@ -28,6 +28,15 @@ module.exports.activate = (rhost) => {
     return input;
   }
 
+  // Settings hold whatever was last written, and `_host`'s settings.set can
+  // write these keys as an array while this dialog writes a string. Both are
+  // displayed the same way rather than one of them rendering as "[object
+  // Object]" or as a value the operator did not type.
+  function asList(v) {
+    if (Array.isArray(v)) return v.map((x) => String(x).trim()).filter(Boolean).join(', ');
+    return typeof v === 'string' ? v : '';
+  }
+
   function renderStatus(res) {
     if (!statusEl) return;
     if (!res || !res.ok) {
@@ -75,8 +84,17 @@ module.exports.activate = (rhost) => {
       inbox.checked = routes.inbox === undefined ? true : !!routes.inbox;
 
       const seat = field(bodyEl, 'seat', 'Also DM seat',
-        'A session name to DM each message to, or empty for none.', 'text');
+        'A session name to DM each message to, or empty for none. At most 10 messages every 10 minutes '
+        + 'reach a seat, as a one-line summary; the inbox always gets the full text.', 'text');
       seat.value = typeof routes.seat === 'string' ? routes.seat : '';
+
+      const allow = field(bodyEl, 'allowFrom', 'Only from',
+        'Comma-separated tag or title prefixes, e.g. github. Empty means everything is accepted.', 'text');
+      allow.value = asList(v.allowFrom);
+
+      const ignore = field(bodyEl, 'ignoreTitles', 'Ignore titles containing',
+        'Comma-separated, case-insensitive, e.g. labeled, unlabeled. Matching messages are dropped silently.', 'text');
+      ignore.value = asList(v.ignoreTitles);
 
       statusEl = document.createElement('div');
       statusEl.className = 'ntfy-settings-status';
@@ -101,16 +119,24 @@ module.exports.activate = (rhost) => {
       const urlEl = get('url');
       const inboxEl = get('inbox');
       const seatEl = get('seat');
+      const allowEl = get('allowFrom');
+      const ignoreEl = get('ignoreTitles');
       // A missing field means the form is not the one rendered above, and a
       // patch built from defaults would then quietly overwrite real settings
       // with them. Save nothing instead.
-      if (!urlEl || !inboxEl || !seatEl) return null;
+      if (!urlEl || !inboxEl || !seatEl || !allowEl || !ignoreEl) return null;
+      // The two lists are handed over as the raw strings they were typed as.
+      // Splitting them here would put the parse in two places — the engine has
+      // to do it anyway, since it must cope with values that never came through
+      // this dialog — and two parsers for one format is how they drift.
       return {
         url: String(urlEl.value).trim(),
         routes: {
           inbox: !!inboxEl.checked,
           seat: String(seatEl.value).trim(),
         },
+        allowFrom: String(allowEl.value).trim(),
+        ignoreTitles: String(ignoreEl.value).trim(),
       };
     },
   });

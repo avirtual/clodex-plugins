@@ -2,6 +2,7 @@
 
 const http = require('node:http');
 const https = require('node:https');
+const crypto = require('node:crypto');
 
 const TOKEN_ENV = 'CLODEX_NTFY_TOKEN';
 
@@ -69,6 +70,68 @@ const POLL_MS = envMs('CLODEX_NTFY_POLL_MS', 30000);
 // bound for the same reason the stream buffer has one.
 const POLL_BODY_MAX = 1024 * 1024;
 
+/*
+ * A BUDGET ON WHAT REACHES A SEAT.
+ *
+ * The inbox and the seat are not the same kind of destination, and the whole of
+ * this section follows from that. An inbox note is a place an operator GOES TO
+ * LOOK: fifty of them is a busy afternoon. An injection is an INTERRUPTION that
+ * lands in an agent's context and stays there, so fifty of them is that agent's
+ * working memory spent on a webhook. The topic is a public-read endpoint fed by
+ * GitHub — anyone who can comment on a repo can put text into it — so "how many
+ * messages arrive" is not something this plugin gets to assume.
+ *
+ * Hence: the inbox route is unchanged and unbudgeted, and everything below
+ * applies to the seat alone.
+ */
+
+// The seat gets a SUMMARY, and this is its hard ceiling. Bytes, not characters:
+// a title of 160 emoji is 640 bytes, so a character count is not a bound on
+// what an injection costs.
+const SEAT_MAX_BYTES = 500;
+const SEAT_TITLE_BYTES = 140;
+const SEAT_LINE_BYTES = 180;
+
+// Past this, a message is inbox-only and never injected, budget or no budget.
+// A single 100KB comment costs an agent more than the whole hourly allowance,
+// and the inbox copy is clipped to MESSAGE_MAX anyway — so the seat loses
+// nothing here that it would have been shown.
+const SEAT_MESSAGE_MAX_BYTES = 8 * 1024;
+
+// Injections allowed per window. Constants rather than settings on purpose:
+// these are a safety property of the plugin, and an operator tuning them upward
+// under a flood is exactly the moment they should not be able to.
+const BURST_MAX = 10;
+const HOUR_MAX = 40;
+
+// The windows themselves ARE env-overridable, for the same reason the timeouts
+// are: the sliding half of a rate limit is untestable otherwise, and a budget
+// that never refills looks identical to a working one for the first ten minutes.
+const BURST_WINDOW_MS = envMs('CLODEX_NTFY_BURST_WINDOW_MS', 10 * 60 * 1000);
+const HOUR_WINDOW_MS = envMs('CLODEX_NTFY_HOUR_WINDOW_MS', 60 * 60 * 1000);
+
+// Duplicate collapse: the same title+message inside this window is dropped.
+// Separate from BURST_WINDOW_MS despite sharing a default — one bounds delivery
+// rate, the other bounds repetition, and they would be tuned apart.
+const DUP_WINDOW_MS = envMs('CLODEX_NTFY_DUP_WINDOW_MS', 10 * 60 * 1000);
+const RECENT_MAX = 20;
+
+/*
+ * How long the held-back notice waits before it is sent.
+ *
+ * It is DEFERRED rather than sent on the first held message, and that is the
+ * whole point of the delay: a flood trips the budget on message eleven, so a
+ * notice sent there says "1 message held back" and then goes quiet for an hour
+ * while the other thirty-nine pile up silently. The seat would be told the one
+ * number that does not matter. Waiting a minute lets the burst finish and
+ * reports what it actually came to.
+ */
+const HELD_NOTICE_MS = envMs('CLODEX_NTFY_HELD_NOTICE_MS', 60 * 1000);
+
+// A settings key `_host`'s settings.set can write with any content at all, so
+// the list it parses into needs a bound like every other read here.
+const LIST_MAX = 32;
+
 const TOPIC_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SEAT_RE = /^(?!\.+$)[a-zA-Z0-9._-]{1,64}$/;
 
@@ -112,6 +175,9 @@ let configuredUrl = null;
 let mode = 'stream';
 let headerTimeouts = 0;
 let polling = false;   // a poll request is in flight; keeps them from overlapping
+// The pending held-back notice, if one is armed. Only ever one: a second timer
+// would send a second notice for the same hour.
+let heldTimer = null;
 
 function logInfo(msg) {
   try { if (host) host.log.info(msg); } catch (_) {}
@@ -140,6 +206,11 @@ function clearTimers() {
     try { clearTimeout(t); } catch (_) {}
   }
   timers.clear();
+  // The held-notice timer lives in the same set, so it has just been cancelled.
+  // Forgetting to drop the handle would leave armHeldNotice() believing a notice
+  // is still pending and refusing to arm another for the life of the plugin —
+  // a reconnect (which calls this) would silence the notice permanently.
+  heldTimer = null;
 }
 
 function parseTopicUrl(raw) {
@@ -155,6 +226,26 @@ function parseTopicUrl(raw) {
   return { href: `${u.origin}${u.pathname}`.replace(/\/+$/, ''), topic, secure: u.protocol === 'https:' };
 }
 
+/*
+ * Both filter lists are parsed HERE, on read, and not in the renderer.
+ *
+ * Same reason the url is validated on read: `_host`'s `settings.set` answers on
+ * both surfaces and can write any plugin's settings key, so whatever the
+ * dialog does is never the only way a value arrives. Accepting either an array
+ * or a comma-separated string is not politeness — the dialog stores a string
+ * and a hand-edited ui-settings.json will hold an array, and both are real.
+ */
+function readList(raw) {
+  let parts;
+  if (Array.isArray(raw)) parts = raw;
+  else if (typeof raw === 'string') parts = raw.split(',');
+  else return [];
+  return parts
+    .map((x) => String(x == null ? '' : x).trim())
+    .filter(Boolean)
+    .slice(0, LIST_MAX);
+}
+
 function readSettings() {
   let s = {};
   try { s = host.settings.get() || {}; } catch (_) { s = {}; }
@@ -166,8 +257,14 @@ function readSettings() {
       inbox: routes.inbox === undefined ? DEFAULTS.routes.inbox : !!routes.inbox,
       seat: SEAT_RE.test(seat) ? seat : '',
     },
+    allowFrom: readList(s.allowFrom),
+    // Lowercased once, here, so the case-insensitive match downstream is a
+    // plain `includes` rather than a regex built from operator input.
+    ignoreTitles: readList(s.ignoreTitles).map((x) => x.toLowerCase()),
   };
 }
+
+const nums = (v, max) => (Array.isArray(v) ? v.filter((x) => Number.isFinite(x)).slice(-max) : []);
 
 function readStorage() {
   let s = {};
@@ -176,7 +273,38 @@ function readStorage() {
   return {
     lastId: (typeof s.lastId === 'string' && s.lastId) ? s.lastId : null,
     seen,
+    // Injection timestamps, newest last. Persisted rather than kept in memory
+    // because a budget that resets on restart is not a budget: a plugin that
+    // reconnects on a backoff would refill its allowance every time the stream
+    // dropped, which under a flood is precisely when it drops.
+    injections: nums(s.injections, HOUR_MAX * 4),
+    // The last RECENT_MAX routed messages as { h: digest, at: ms }, for
+    // duplicate collapse. Digests, not bodies — this file is on disk, the
+    // bodies are attacker-supplied, and nothing here needs to read them back.
+    recent: Array.isArray(s.recent)
+      ? s.recent.filter((r) => r && typeof r.h === 'string' && Number.isFinite(r.at)).slice(-RECENT_MAX)
+      : [],
+    // When the "N held back" line was last sent, and how many have been held
+    // since. Both persisted for the same reason as `injections`.
+    heldAt: Number.isFinite(s.heldAt) ? s.heldAt : 0,
+    held: Number.isFinite(s.held) ? s.held : 0,
+    // When the allowFrom drop count was last logged, and its running total.
+    droppedAt: Number.isFinite(s.droppedAt) ? s.droppedAt : 0,
+    dropped: Number.isFinite(s.dropped) ? s.dropped : 0,
   };
+}
+
+/*
+ * `host.storage.set` REPLACES THE WHOLE FILE — it is not a merge. Writing
+ * `{ lastId }` therefore deletes `seen`, `injections` and everything else in one
+ * go. Every write in this plugin goes through here, which reads the current
+ * state and merges, so a caller that only means to move the cursor cannot
+ * silently discard the budget.
+ */
+function saveStorage(patch) {
+  const st = readStorage();
+  try { host.storage.set({ ...st, ...patch }); }
+  catch (e) { logError(`could not persist state: ${errText(e)}`); }
 }
 
 function remember(id) {
@@ -184,7 +312,7 @@ function remember(id) {
   const seen = st.seen.filter((x) => x !== id);
   seen.push(id);
   while (seen.length > SEEN_MAX) seen.shift();
-  try { host.storage.set({ lastId: id, seen }); } catch (e) { logError(`could not persist lastId: ${errText(e)}`); }
+  saveStorage({ lastId: id, seen });
 }
 
 function neuter(text) {
@@ -195,6 +323,19 @@ function clip(text, max) {
   const s = String(text == null ? '' : text);
   return s.length <= max ? s : `${s.slice(0, max)}…`;
 }
+
+// Bytes, not characters, because the seat budget is about what an injection
+// COSTS: 200 emoji is 200 characters and 800 bytes. Cutting a UTF-8 buffer can
+// land mid-sequence, which Node renders as U+FFFD, so a trailing one is dropped
+// rather than shipped.
+function clipBytes(text, max) {
+  const s = String(text == null ? '' : text);
+  if (Buffer.byteLength(s, 'utf8') <= max) return s;
+  const cut = Buffer.from(s, 'utf8').subarray(0, Math.max(0, max - 3)).toString('utf8');
+  return `${cut.replace(/\uFFFD$/, '')}…`;
+}
+
+const byteLen = (s) => Buffer.byteLength(String(s), 'utf8');
 
 // The head line sits OUTSIDE the fence, so the title must be folded to one line
 // in its own right: a break there puts attacker text at column 1, above the
@@ -207,28 +348,178 @@ function clip(text, max) {
 // not folded at all; it is inside the fence, where breaking lines is allowed.
 const TITLE_BREAKS = /[\r\n\u2028\u2029]+/g;
 
+function foldTitle(raw) {
+  return String(raw == null ? '' : raw).replace(TITLE_BREAKS, ' ');
+}
+
 function noteText(ev, topic) {
-  const title = String(ev.title == null ? '' : ev.title).replace(TITLE_BREAKS, ' ');
-  const head = `[ntfy] ${topic}: ${clip(neuter(title), TITLE_MAX)}`.trimEnd();
+  const head = `[ntfy] ${topic}: ${clip(neuter(foldTitle(ev.title)), TITLE_MAX)}`.trimEnd();
   return [head, '', UNTRUSTED_OPEN, clip(neuter(ev.message), MESSAGE_MAX), UNTRUSTED_END].join('\n');
+}
+
+/*
+ * What a seat gets: a summary, and a pointer to the full text.
+ *
+ * No fence, because there is nothing to fence off — the only attacker-controlled
+ * spans are two clipped, escaped, single-line fragments, and a banner around 180
+ * bytes of subject line costs more context than the line it is guarding. The
+ * `\[agent:` escaping still applies, because THAT is what stops the text being
+ * read as instructions, and it is the part that matters at any length.
+ *
+ * The note id is what makes this a summary rather than a truncation: it is the
+ * operator's route back to the whole message. It comes from host.notify.user's
+ * return value, so the inbox route must have run — see route().
+ */
+function seatText(ev, topic, noteId) {
+  const title = clipBytes(neuter(foldTitle(ev.title)), SEAT_TITLE_BYTES);
+  const head = `[ntfy] ${topic}: ${title}`.trimEnd();
+  const first = foldTitle(String(ev.message == null ? '' : ev.message).split('\n').find((l) => l.trim()) || '');
+  const body = clipBytes(neuter(first), SEAT_LINE_BYTES);
+  // Without a note there is no full copy anywhere, so pointing at the inbox
+  // would be a lie — and the operator who turned the inbox off is the one person
+  // who needs to know the seat is now the only copy and it is a clipped one.
+  const tail = noteId
+    ? `(full text in the inbox, id ${noteId})`
+    : '(clipped; the inbox note is off, so the full text was not kept)';
+  const text = [head, body, tail].filter(Boolean).join('\n');
+  // A belt-and-braces bound on the WHOLE thing. The pieces above are each
+  // clipped, so this should never fire — but "should never" is how a budget
+  // stops being one, and the ceiling is the promise being made here.
+  return byteLen(text) <= SEAT_MAX_BYTES ? text : clipBytes(text, SEAT_MAX_BYTES);
+}
+
+const digest = (ev) => crypto.createHash('sha256')
+  // NUL separates the fields, written as an escape rather than a literal: a raw
+  // one makes this file 'data' to grep and every source-scanning tool goes
+  // quiet on it. A printable separator would let a title/message boundary shift
+  // without changing the digest, which is a collision between two real messages.
+  .update(`${String(ev.title == null ? '' : ev.title)}\u0000${String(ev.message == null ? '' : ev.message)}`)
+  .digest('hex').slice(0, 32);
+
+/*
+ * FILTERING, evaluated before anything is routed.
+ *
+ * Returns a reason string to drop, or null to keep. Every drop still bumps the
+ * cursor — see handleLine — so a filtered topic does not replay from the
+ * beginning on the next reconnect.
+ */
+function dropReason(ev, cfg, now) {
+  // allowFrom: a prefix match against the ntfy tags OR the title. Tags are the
+  // real signal (the github webhook template sets them) and the title is the
+  // fallback for a sender that does not tag. Prefix rather than equality
+  // because ntfy tags carry suffixes — `github`, `github-pr`.
+  if (cfg.allowFrom.length) {
+    const tags = Array.isArray(ev.tags) ? ev.tags.map((t) => String(t)) : [];
+    const cands = tags.concat([foldTitle(ev.title)]);
+    const ok = cfg.allowFrom.some((p) => cands.some((c) => c.startsWith(p)));
+    if (!ok) return 'allowFrom';
+  }
+
+  // ignoreTitles: case-insensitive substrings. Label churn (`labeled`,
+  // `unlabeled`) is the motivating case — high volume, no information.
+  if (cfg.ignoreTitles.length) {
+    const t = foldTitle(ev.title).toLowerCase();
+    if (cfg.ignoreTitles.some((s) => t.includes(s))) return 'ignoreTitles';
+  }
+
+  // Duplicate collapse. Today's dedupe is by id, and a sender republishing the
+  // same text gets a fresh id every time — so identical content inside the
+  // window is dropped on content, not identity.
+  const h = digest(ev);
+  if (readStorage().recent.some((r) => r.h === h && (now - r.at) < DUP_WINDOW_MS)) return 'duplicate';
+
+  return null;
+}
+
+/*
+ * The seat's rate budget: two sliding windows over persisted timestamps.
+ *
+ * Returns { allowed, held } — `held` being the number of injections skipped
+ * since the last time the operator was told about it, which is what the
+ * held-back line reports.
+ */
+function seatBudget(now) {
+  const st = readStorage();
+  const inj = st.injections.filter((t) => (now - t) < HOUR_WINDOW_MS);
+  const burst = inj.filter((t) => (now - t) < BURST_WINDOW_MS);
+  return {
+    allowed: burst.length < BURST_MAX && inj.length < HOUR_MAX,
+    injections: inj,
+    held: st.held,
+    heldAt: st.heldAt,
+  };
+}
+
+function injectSeat(seat, text) {
+  let handle = null;
+  try { handle = host.sessions.get(seat); } catch (_) { handle = null; }
+  if (handle && handle.isAlive()) { handle.inject(text, { parkable: true }); return true; }
+  logInfo(`seat ${seat} is not live; message not delivered to a seat`);
+  return false;
+}
+
+/*
+ * Arm the "N held back" notice, once per hour and once per burst.
+ *
+ * The count is read when the timer FIRES, not when it is armed, so the notice
+ * reports the whole burst rather than the first message of it. A notice is
+ * itself an injection — deliberately not charged to the budget, since the budget
+ * is what it is reporting on, and charging it would let a flood spend the
+ * allowance on the message that says the allowance is spent.
+ */
+function armHeldNotice(seat, topic, now, heldAt) {
+  if (heldTimer) return;                                 // a burst arms one timer
+  if ((now - heldAt) < HOUR_WINDOW_MS) return;           // already told this hour
+  heldTimer = schedule(() => {
+    heldTimer = null;
+    if (stopped) return;
+    const st = readStorage();
+    if (!st.held) return;
+    const line = `[ntfy] ${topic}: ${st.held} message${st.held === 1 ? '' : 's'} `
+      + 'held back this hour; see the inbox';
+    if (injectSeat(seat, line)) saveStorage({ held: 0, heldAt: Date.now() });
+  }, HELD_NOTICE_MS);
 }
 
 function route(ev, topic) {
   const cfg = readSettings();
-  const text = noteText(ev, topic);
+  const now = Date.now();
 
+  // The inbox runs FIRST, and not only because it is unbudgeted: its return
+  // value carries the note id that the seat summary points at.
+  let noteId = null;
   if (cfg.routes.inbox) {
     let r = null;
-    try { r = host.notify.user({ body: text }); } catch (e) { r = { ok: false, error: errText(e) }; }
-    if (!r || !r.ok) logError(`inbox note refused: ${(r && r.error) || 'unknown'}`);
+    try { r = host.notify.user({ body: noteText(ev, topic) }); } catch (e) { r = { ok: false, error: errText(e) }; }
+    if (r && r.ok) noteId = r.id;
+    else logError(`inbox note refused: ${(r && r.error) || 'unknown'}`);
   }
 
-  if (cfg.routes.seat) {
-    let handle = null;
-    try { handle = host.sessions.get(cfg.routes.seat); } catch (_) { handle = null; }
-    if (handle && handle.isAlive()) handle.inject(text, { parkable: true });
-    else logInfo(`seat ${cfg.routes.seat} is not live; message not delivered to a seat`);
+  if (!cfg.routes.seat) return;
+
+  // Oversized messages are inbox-only regardless of budget: spending an
+  // injection on one is worse than spending the budget on ten normal ones.
+  if (byteLen(ev.message == null ? '' : ev.message) > SEAT_MESSAGE_MAX_BYTES) {
+    logInfo(`message ${ev.id} is over ${Math.round(SEAT_MESSAGE_MAX_BYTES / 1024)}KB — inbox only, not injected`);
+    return;
   }
+
+  const budget = seatBudget(now);
+  if (!budget.allowed) {
+    // Every held message is logged, so the plugin log is a complete record even
+    // though the seat is deliberately told once.
+    logInfo(`seat budget spent — message ${ev.id} is in the inbox but was not injected`);
+    saveStorage({ held: budget.held + 1 });
+    armHeldNotice(cfg.routes.seat, topic, now, budget.heldAt);
+    return;
+  }
+
+  if (!injectSeat(cfg.routes.seat, seatText(ev, topic, noteId))) return;
+  // Counted only on a DELIVERED injection. A message the seat never got has not
+  // cost it any context, so charging the budget for it would let a dead seat
+  // exhaust the allowance of the live one that replaces it.
+  const injections = budget.injections.concat(now).slice(-(HOUR_MAX * 4));
+  saveStorage({ injections });
 }
 
 function handleLine(line, topic) {
@@ -243,9 +534,46 @@ function handleLine(line, topic) {
   if (!id) return;
   if (readStorage().seen.includes(id)) return;
 
+  // The cursor moves for every message SEEN, before any filter runs and whatever
+  // any of them decide. A cursor that only advanced past routed messages would
+  // re-fetch every filtered one on the next reconnect — so a topic filtered down
+  // to nothing would replay its whole backlog forever, and the filters would
+  // cost more work the better they worked.
   remember(id);
   lastEventAt = Date.now();
+
+  const now = Date.now();
+  const cfg = readSettings();
+  const why = dropReason(ev, cfg, now);
+  if (why) {
+    if (why === 'allowFrom') countAllowFromDrop(now);
+    // ignoreTitles and duplicate are silent by design: both are the operator
+    // saying "I know about these and do not want to hear about them", and a log
+    // line per drop is the noise they just asked to be rid of.
+    return;
+  }
+
+  // Recorded for duplicate collapse before routing, so two copies arriving in
+  // the same batch collapse against each other and not only against the disk.
+  const st = readStorage();
+  const recent = st.recent.concat({ h: digest(ev), at: now }).slice(-RECENT_MAX);
+  saveStorage({ recent });
+
   route(ev, topic);
+}
+
+// allowFrom drops are counted and reported at most once an hour. Silence would
+// be wrong here — an allowFrom that matches nothing looks exactly like a dead
+// topic — but a line per drop is the flood the setting exists to stop.
+function countAllowFromDrop(now) {
+  const st = readStorage();
+  const dropped = st.dropped + 1;
+  if ((now - st.droppedAt) >= HOUR_WINDOW_MS) {
+    logInfo(`${dropped} message${dropped === 1 ? '' : 's'} dropped by allowFrom in the last hour`);
+    saveStorage({ dropped: 0, droppedAt: now });
+    return;
+  }
+  saveStorage({ dropped });
 }
 
 function scheduleReconnect() {
@@ -578,6 +906,12 @@ module.exports.activate = (h) => {
     connected,
     lastId: readStorage().lastId,
     lastEventAt,
+    // How much of the seat's allowance is left. Surfaced because a seat that
+    // has stopped being injected while the inbox keeps filling is otherwise
+    // indistinguishable from a broken seat name, and this is the dialog an
+    // operator would check.
+    seatBudgetLeft: Math.max(0, BURST_MAX - seatBudget(Date.now()).injections
+      .filter((t) => (Date.now() - t) < BURST_WINDOW_MS).length),
     // Two different "not connected"s, kept apart: `idle` is a configuration
     // answer and stays until the settings change, `error` is the last network
     // failure and is cleared by a successful connect.

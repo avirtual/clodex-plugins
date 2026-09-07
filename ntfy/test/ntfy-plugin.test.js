@@ -222,7 +222,48 @@ test('a message becomes an inbox note: fenced, with [agent: escaped', { skip: SK
   }
 });
 
-test('a live seat is injected with the same fenced text, parkable', { skip: SKIP }, async () => {
+// ── the seat gets a summary, the inbox gets the message ────────────────────
+// The asymmetry is the design: an inbox note is a place the operator goes to
+// look, an injection is an interruption that occupies an agent's context. So the
+// seat copy is bounded and points AT the note rather than repeating it.
+
+test('a live seat is injected with a bounded summary carrying the note id, parkable', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push(MESSAGE);
+    assert.ok(await until(() => h.injected.length === 1), 'the seat was injected');
+    const text = h.injected[0].text;
+    assert.equal(h.injected[0].name, 'seat');
+    assert.deepStrictEqual(h.injected[0].opts, { parkable: true }, 'injected parkable');
+
+    // Escaping survives the shortening — it is the part that matters at any
+    // length, because it is what stops the text being read as instructions.
+    assert.ok(text.includes('\\[agent:dm ops]'), 'an intent smuggled into the TITLE is escaped for the seat');
+    assert.ok(!/(^|[^\\])\[agent:/.test(text), 'no unescaped [agent: reaches a live seat');
+
+    // ENTER: the note this summary points at really was raised, so the id below
+    // is a real inbox id and not a placeholder.
+    assert.equal(h.notes.length, 1, 'the inbox got the full note');
+    assert.ok(text.includes(`id ${h.notes[0].id}`), 'the summary names the note it summarises');
+    assert.ok(text.includes('full text in the inbox'), 'and says where the rest is');
+    assert.ok(!text.includes('was not kept'), 'and does not claim the text was lost');
+
+    assert.ok(Buffer.byteLength(text, 'utf8') < 500, `the seat copy is bounded (${Buffer.byteLength(text, 'utf8')} bytes)`);
+    assert.ok(text.length < h.notes[0].body.length, 'and is shorter than the note');
+    assert.ok(!text.includes('---- END UNTRUSTED ----'),
+      'no fence: the summary is two clipped escaped fragments, and a banner would cost more than it guards');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('with the inbox off, the summary does not point at a note that was never raised', { skip: SKIP }, async () => {
   const srv = ntfyServer();
   const url = await srv.listen();
   const h = makeHost({ settings: { url, routes: { inbox: false, seat: 'seat' } } });
@@ -232,13 +273,76 @@ test('a live seat is injected with the same fenced text, parkable', { skip: SKIP
 
     srv.push(MESSAGE);
     assert.ok(await until(() => h.injected.length === 1), 'the seat was injected');
-    assert.equal(h.injected[0].name, 'seat');
-    assert.ok(h.injected[0].text.includes('\\[agent:reboot]'), 'the seat gets the escaped text');
-    assert.ok(h.injected[0].text.includes('\\[agent:dm ops]'), 'an intent smuggled into the TITLE is escaped for the seat too');
-    assert.ok(!/(^|[^\\])\[agent:/.test(h.injected[0].text), 'no unescaped [agent: reaches a live seat');
-    assert.ok(h.injected[0].text.includes('---- END UNTRUSTED ----'), 'the seat gets the fence');
-    assert.deepStrictEqual(h.injected[0].opts, { parkable: true }, 'injected parkable');
     assert.equal(h.notes.length, 0, 'inbox off means no note');
+
+    // The seat copy is clipped, so with no note there is no full copy anywhere.
+    // Saying "full text in the inbox" would send the operator looking for
+    // something that was never written.
+    const text = h.injected[0].text;
+    assert.ok(!/full text in the inbox/.test(text), 'it does not point at an inbox note that does not exist');
+    assert.ok(!/\bid\s+n\d/.test(text), 'and quotes no note id');
+    assert.match(text, /the inbox note is off/, 'it says why the text is only a summary');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a seat summary is bounded in BYTES, not characters', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // Every character here is four bytes. A character-counted clip would pass
+    // 160 title chars + 200 body chars = 1440 bytes to a seat while believing
+    // it had sent 360 — which is the whole reason the bound is in bytes.
+    //
+    // The message is kept under the 8KB kill on purpose: over it, the seat is
+    // skipped entirely and this test would pass with every clip removed,
+    // because nothing would be injected to measure.
+    srv.push({
+      id: 'w1',
+      event: 'message',
+      title: '🐙'.repeat(400),
+      message: '🐙'.repeat(1000),
+    });
+    assert.ok(await until(() => h.injected.length === 1), 'the seat was injected');
+
+    const bytes = Buffer.byteLength(h.injected[0].text, 'utf8');
+    assert.ok(bytes <= 500, `the summary is ${bytes} bytes, over the 500-byte ceiling`);
+    // A cut that lands mid-sequence renders as U+FFFD. Clipping on a byte
+    // boundary without checking for that ships a broken glyph.
+    assert.ok(!/�/.test(h.injected[0].text), 'no replacement character from a mid-sequence cut');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a message over 8KB is inbox-only and never injected', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'big', event: 'message', title: 'a huge comment', message: 'x'.repeat(9 * 1024) });
+    // ENTER: it was handled at all — the inbox note is the proof, and without it
+    // "nothing was injected" would be true of a message that never arrived.
+    assert.ok(await until(() => h.notes.length === 1), 'the inbox still got it');
+
+    await settle();
+    assert.equal(h.injected.length, 0, 'but the seat did not');
+    assert.ok(h.logged.some((l) => /inbox only, not injected/.test(l)), 'and the skip is in the log');
+
+    // The budget is untouched: an injection that never happened must not be
+    // charged, or one oversized message would cost the seat a real one.
+    srv.push({ id: 'small', event: 'message', title: 'normal', message: 'fine' });
+    assert.ok(await until(() => h.injected.length === 1), 'a normal message still reaches the seat');
   } finally {
     h.cleanup();
     await srv.close();
@@ -823,6 +927,306 @@ test('a title broken with U+2028 is still folded to one line', { skip: SKIP }, a
     assert.ok(!/[\u2028\u2029]/.test(head), 'no unicode line separator survives in the head');
     assert.ok(head.includes('\\[agent:dm ops]'), 'and the intent after it is escaped, still on the head line');
     assert.equal(body.split('\n')[1], '', 'the head is one line, followed by the blank separator');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+// ── the seat rate budget ───────────────────────────────────────────────────
+// Motivating case, in Bogdan's words: "I don't want some bot to kill your
+// context by throwing 100x10000 characters at you." The topic is a public-read
+// endpoint fed by GitHub, so the volume is not this plugin's to assume.
+
+test('a burst of 50: the inbox gets all of them, the seat gets 10 and one held-back line', { skip: SKIP }, async () => {
+  // The notice is DEFERRED so it can report the whole burst. Sent on the first
+  // held message it would say "1 message held back" and then go quiet for an
+  // hour while the other 39 piled up silently — the seat told the one number
+  // that does not matter. Shortened here; a minute in production.
+  const prev = process.env.CLODEX_NTFY_HELD_NOTICE_MS;
+  process.env.CLODEX_NTFY_HELD_NOTICE_MS = '300';
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // Distinct titles and bodies, so nothing here is dropped as a duplicate —
+    // this test is about the RATE, and a dedupe doing the work instead would
+    // make it green for the wrong reason.
+    for (let i = 0; i < 50; i++) {
+      srv.push({ id: `b${i}`, event: 'message', title: `build ${i}`, message: `result ${i}` });
+    }
+
+    assert.ok(await until(() => h.notes.length === 50, 8000),
+      `the inbox is unbudgeted and got all 50 (saw ${h.notes.length})`);
+    await settle(40);
+
+    // Before the notice fires: exactly the allowance, and nothing else.
+    assert.equal(h.injected.length, 10, 'the seat saw the 10 it was allowed and no more');
+
+    // 10 summaries + the single held-back line. The line is itself an injection,
+    // so it is capped at one per hour — a per-message notice would be the flood
+    // the budget exists to prevent.
+    assert.ok(await until(() => h.injected.length === 11, 5000), 'the held-back line arrived');
+    const held = h.injected[10].text;
+    assert.match(held, /held back this hour; see the inbox/, 'the last injection is the held-back line');
+    assert.match(held, /\b40\b/, 'and it counts all 40 that were held, not just the first');
+
+    await new Promise((r) => setTimeout(r, 400));
+    assert.equal(h.injected.length, 11, 'and it is sent once, not once per held message');
+
+    for (const inj of h.injected) {
+      assert.ok(Buffer.byteLength(inj.text, 'utf8') < 500, 'every injection stayed under the ceiling');
+    }
+    // ENTER: the 40 held messages are individually in the log, so the plugin's
+    // own record is complete even though the seat was told once.
+    assert.equal(h.logged.filter((l) => /seat budget spent/.test(l)).length, 40,
+      'each held message was logged exactly once');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.seatBudgetLeft, 0, 'status.get shows the allowance spent');
+    assert.equal(st.lastId, 'b49', 'and the cursor is at the last message SEEN');
+  } finally {
+    h.cleanup();
+    await srv.close();
+    if (prev === undefined) delete process.env.CLODEX_NTFY_HELD_NOTICE_MS;
+    else process.env.CLODEX_NTFY_HELD_NOTICE_MS = prev;
+  }
+});
+
+test('the budget refills as its window slides', { skip: SKIP }, async () => {
+  const prev = process.env.CLODEX_NTFY_BURST_WINDOW_MS;
+  process.env.CLODEX_NTFY_BURST_WINDOW_MS = '400';
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: false, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    for (let i = 0; i < 12; i++) {
+      srv.push({ id: `r${i}`, event: 'message', title: `t${i}`, message: `m${i}` });
+    }
+    assert.ok(await until(() => h.injected.length >= 10, 5000), 'the first ten went through');
+    await settle(30);
+    const spent = h.injected.length;
+
+    // ENTER: the allowance really is spent — otherwise the delivery below is
+    // not a refill, just a budget that was never reached.
+    const mid = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(mid.seatBudgetLeft, 0, 'the allowance is spent');
+
+    // Past the window, the oldest timestamps fall out and the allowance returns.
+    // A budget that never refills looks identical to a working one for the first
+    // ten minutes, which is exactly why the window is overridable here.
+    await new Promise((r) => setTimeout(r, 500));
+    srv.push({ id: 'r99', event: 'message', title: 'after', message: 'the window slid' });
+    assert.ok(await until(() => h.injected.length > spent, 5000),
+      'a message after the window is injected again');
+  } finally {
+    h.cleanup();
+    await srv.close();
+    if (prev === undefined) delete process.env.CLODEX_NTFY_BURST_WINDOW_MS;
+    else process.env.CLODEX_NTFY_BURST_WINDOW_MS = prev;
+  }
+});
+
+// ── filtering ──────────────────────────────────────────────────────────────
+
+test('a burst of 30 with two exact repeats: repeats are collapsed, and lastId is the last id SEEN', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({
+    settings: {
+      url,
+      routes: { inbox: true, seat: '' },
+      ignoreTitles: 'labeled',
+    },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // 30 messages: 5 with an ignored title, 2 exact repeats of an earlier one
+    // under fresh ids, 23 distinct. Dedupe by id would let the repeats through —
+    // a sender republishing gets a new id every time, which is the case the
+    // content digest exists for.
+    // The LAST message is a dropped one, and that is load-bearing. End the burst
+    // on a routed message and `lastId === 'x29'` is true whether the cursor
+    // advances on every message or only on routed ones — the assertion below
+    // would pass over exactly the bug it exists to catch.
+    const dup = { title: 'push on main', message: 'the same text twice' };
+    let expected = 0;
+    for (let i = 0; i < 30; i++) {
+      let ev;
+      if (i === 5) { ev = { ...dup }; expected += 1; }
+      else if (i === 12 || i === 20) { ev = { ...dup }; }        // exact repeats
+      else if (i % 7 === 0 || i === 29) { ev = { title: `labeled: bug ${i}`, message: `noise ${i}` }; }
+      else { ev = { title: `pr ${i}`, message: `body ${i}` }; expected += 1; }
+      srv.push({ id: `x${i}`, event: 'message', ...ev });
+    }
+
+    assert.ok(await until(() => h.notes.length === expected, 8000),
+      `only the kept messages were routed (saw ${h.notes.length}, expected ${expected})`);
+    await settle(40);
+    assert.equal(h.notes.length, expected, 'and nothing arrived late');
+
+    // ENTER: filtering really did drop things — otherwise `expected` could equal
+    // the total and this test would pass with every filter removed.
+    assert.ok(expected < 30, 'the fixture really does contain messages that must be dropped');
+    assert.ok(!h.notes.some((n) => /labeled:/.test(n.body)), 'no ignored title was routed');
+    assert.equal(h.notes.filter((n) => /the same text twice/.test(n.body)).length, 1,
+      'the two exact repeats collapsed into the one that was routed first');
+
+    // The point of the whole test. A cursor that only advanced past ROUTED
+    // messages would re-fetch every filtered one on the next reconnect, so a
+    // well-filtered topic would replay its backlog forever.
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.lastId, 'x29', 'the cursor is the last id SEEN, not the last routed');
+
+    srv.drop();
+    assert.ok(await until(() => srv.state.requests.length === 2, 8000), 'it reconnected');
+    assert.equal(srv.state.requests[1].since, 'x29', 'and resumes past the dropped messages too');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('allowFrom matches a tag or a title prefix, and drops are counted not silent', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({
+    settings: { url, routes: { inbox: true, seat: '' }, allowFrom: 'github' },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'a1', event: 'message', tags: ['github'], title: 'push', message: 'tagged' });
+    srv.push({ id: 'a2', event: 'message', tags: ['github-pr'], title: 'pr', message: 'prefix, not equality' });
+    srv.push({ id: 'a3', event: 'message', title: 'github: fallback', message: 'title match' });
+    srv.push({ id: 'a4', event: 'message', tags: ['spam'], title: 'buy now', message: 'dropped' });
+    srv.push({ id: 'a5', event: 'message', title: 'no tags at all', message: 'dropped' });
+
+    assert.ok(await until(() => h.notes.length === 3, 5000), 'the three matching messages were routed');
+    await settle(20);
+    assert.equal(h.notes.length, 3, 'and the two non-matching ones stayed out');
+    assert.ok(!h.notes.some((n) => /dropped/.test(n.body)), 'neither dropped message was routed');
+
+    // Silence would be wrong: an allowFrom matching nothing is indistinguishable
+    // from a dead topic, and that is a configuration mistake with no other tell.
+    assert.ok(h.logged.some((l) => /dropped by allowFrom/.test(l)), 'the drops reached the log');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.lastId, 'a5', 'the cursor still advanced past the dropped messages');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('an empty allowFrom accepts everything', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' }, allowFrom: '' } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'e1', event: 'message', tags: ['anything'], title: 'untagged sender', message: 'kept' });
+    assert.ok(await until(() => h.notes.length === 1, 5000),
+      'an unset filter is not a filter that matches nothing');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('the filter lists are parsed in the ENGINE, so a value the dialog never wrote still applies', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  // An ARRAY, which this plugin's collect() never produces — it writes the raw
+  // string. `_host`'s settings.set answers on both surfaces and can write any
+  // plugin's key, so the renderer is never the only door and the engine has to
+  // cope with both shapes. A hand-edited ui-settings.json is the same case.
+  const h = makeHost({
+    settings: { url, routes: { inbox: true, seat: '' }, allowFrom: ['github'], ignoreTitles: ['UNLABELED'] },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'p1', event: 'message', tags: ['github'], title: 'pr opened', message: 'kept' });
+    srv.push({ id: 'p2', event: 'message', tags: ['github'], title: 'pr unlabeled bug', message: 'dropped' });
+    srv.push({ id: 'p3', event: 'message', tags: ['other'], title: 'unrelated', message: 'dropped' });
+
+    assert.ok(await until(() => h.notes.length === 1, 5000), 'the array form filtered as the string form does');
+    await settle(20);
+    assert.equal(h.notes.length, 1, 'both drops held');
+    // Written uppercase in settings, lowercase in the title: the match is
+    // case-insensitive, which is what makes it usable for label churn.
+    assert.ok(!h.notes.some((n) => /unlabeled/i.test(n.body)), 'the case-insensitive substring matched');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a duplicate outside the window is routed again', { skip: SKIP }, async () => {
+  const prev = process.env.CLODEX_NTFY_DUP_WINDOW_MS;
+  process.env.CLODEX_NTFY_DUP_WINDOW_MS = '300';
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    const ev = { event: 'message', title: 'nightly', message: 'build green' };
+    srv.push({ id: 'd1', ...ev });
+    assert.ok(await until(() => h.notes.length === 1), 'the first copy was routed');
+    srv.push({ id: 'd2', ...ev });
+    await settle(20);
+    assert.equal(h.notes.length, 1, 'the immediate repeat collapsed');
+
+    // Collapse is a bound on repetition, not a permanent mute: a nightly build
+    // reporting the same result tomorrow is news, not noise.
+    await new Promise((r) => setTimeout(r, 400));
+    srv.push({ id: 'd3', ...ev });
+    assert.ok(await until(() => h.notes.length === 2, 5000),
+      'the same text after the window is news again');
+  } finally {
+    h.cleanup();
+    await srv.close();
+    if (prev === undefined) delete process.env.CLODEX_NTFY_DUP_WINDOW_MS;
+    else process.env.CLODEX_NTFY_DUP_WINDOW_MS = prev;
+  }
+});
+
+test('storage.set replaces the whole file, so the cursor and the budget survive each other', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: false, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // Two messages, so the second write happens with the first's state on disk.
+    // host.storage.set is a whole-file replace, not a merge: a writer that
+    // passed only { lastId } would drop the injection counters, and one that
+    // passed only { injections } would drop the cursor.
+    srv.push({ id: 's1', event: 'message', title: 'one', message: 'first' });
+    assert.ok(await until(() => h.injected.length === 1));
+    srv.push({ id: 's2', event: 'message', title: 'two', message: 'second' });
+    assert.ok(await until(() => h.injected.length === 2));
+    await settle(20);
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.lastId, 's2', 'the cursor survived the budget write');
+    assert.equal(st.seatBudgetLeft, 8, 'and the budget survived the cursor write');
   } finally {
     h.cleanup();
     await srv.close();
