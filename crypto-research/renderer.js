@@ -88,6 +88,17 @@ function scoreBand(n) {
   return 'cr-band-bad';
 }
 
+// alternative.me's own five bands. Deliberately NOT the up/down palette: a
+// green 80 would read as "good", and extreme greed is the opposite of good.
+function fngBand(n) {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 'cr-fng-none';
+  if (n >= 75) return 'cr-fng-xgreed';
+  if (n >= 55) return 'cr-fng-greed';
+  if (n >= 45) return 'cr-fng-neutral';
+  if (n >= 25) return 'cr-fng-fear';
+  return 'cr-fng-xfear';
+}
+
 /* -------------------------------------------------------------- markdown --- */
 
 /**
@@ -365,6 +376,12 @@ module.exports.activate = (rhost) => {
     topbar.appendChild(folderBtn);
     modal.appendChild(topbar);
 
+    // The market strip: what is true of the market as a whole, above a library
+    // that is entirely about single tokens. It is filled on every open, before
+    // and regardless of any ticker being selected.
+    const ctxBar = el('div', 'cr-ctx');
+    modal.appendChild(ctxBar);
+
     const body = el('div', 'cr-body');
     const colTickers = el('div', 'cr-col cr-col-tickers');
     const colRuns = el('div', 'cr-col cr-col-runs');
@@ -381,6 +398,78 @@ module.exports.activate = (rhost) => {
     // sent. Both come from the engine on every reload — never assumed here.
     let runner = null;
     let requests = {};
+
+    /* ---------------------------------------------------------- context --- */
+
+    /**
+     * BTC, ETH and Fear & Greed across the top — the market the assessments
+     * below were written about.
+     *
+     * Independent of the library and of the selection: it paints on open even
+     * when the root is unresolvable and the three columns are showing an error,
+     * because "what is the market doing" is still answerable then.
+     */
+    async function paintContext() {
+      ctxBar.innerHTML = '';
+      ctxBar.appendChild(el('span', 'cr-ctx-loading', 'market…'));
+
+      let res;
+      try {
+        res = await rhost.invoke('context');
+      } catch (e) {
+        rhost.log.error('context failed', e);
+        res = { state: 'failed', error: String((e && e.message) || e) };
+      }
+      if (torn) return;
+      ctxBar.innerHTML = '';
+
+      if (!res || res.state === 'failed') {
+        // One dim line, not a red banner. The market strip is context; failing
+        // to fetch it must not look like the library failed to load.
+        const f = el('span', 'cr-ctx-failed', `market data unavailable — ${(res && res.error) || 'unknown error'}`);
+        ctxBar.appendChild(f);
+        return;
+      }
+
+      for (const m of res.majors || []) {
+        const cell = el('div', 'cr-ctx-cell');
+        cell.appendChild(el('span', 'cr-ctx-sym', m.symbol));
+        cell.appendChild(el('span', 'cr-ctx-price', fmtUsd(m.price)));
+        cell.appendChild(el('span', `cr-ctx-chg ${pctClass(m.d1)}`, fmtPct(m.d1)));
+        cell.title = `${m.name} — 24h ${fmtPct(m.d1)} · 7d ${fmtPct(m.d7)} · 30d ${fmtPct(m.d30)}`
+          + `\nmarket cap ${fmtUsd(m.marketCap)}`;
+        ctxBar.appendChild(cell);
+      }
+
+      if (res.fng && res.fng.value != null) {
+        const f = res.fng;
+        const cell = el('div', 'cr-ctx-cell cr-ctx-fng');
+        cell.appendChild(el('span', 'cr-ctx-sym', 'F&G'));
+        cell.appendChild(el('span', `cr-ctx-fngval ${fngBand(f.value)}`, String(f.value)));
+        if (f.label) cell.appendChild(el('span', 'cr-ctx-fnglab', f.label));
+        if (f.ago != null) {
+          const d = f.value - f.ago;
+          cell.appendChild(el('span', `cr-ctx-chg ${pctClass(d)}`,
+            `${d > 0 ? '+' : ''}${d} vs ${f.agoDays}d`));
+        }
+        cell.title = 'Fear & Greed Index (alternative.me), 0 = extreme fear, 100 = extreme greed'
+          + (f.ago != null ? `\n${f.agoDays} days ago: ${f.ago}` : '');
+        ctxBar.appendChild(cell);
+      }
+
+      const stamp = el('span', 'cr-ctx-stamp');
+      if (res.state === 'stale') {
+        stamp.className = 'cr-ctx-stamp cr-warn';
+        stamp.textContent = res.cachedAt ? `cached ${fmtAgo(res.cachedAt)}` : 'cached';
+        stamp.title = `Live fetch failed: ${res.error || 'unknown'}`;
+      } else {
+        stamp.textContent = `as of ${new Date().toLocaleTimeString()}`;
+        // The open is the freshness bound, and saying so is the point: nothing
+        // in this strip ticks on its own.
+        stamp.title = 'Fetched when this overlay opened; it does not update while open.';
+      }
+      ctxBar.appendChild(stamp);
+    }
 
     /* ------------------------------------------------------------ quote --- */
 
@@ -459,9 +548,9 @@ module.exports.activate = (rhost) => {
         ? `${((q.circulating / q.total) * 100).toFixed(0)}%` : '—';
       pair('Circulating', floatPct);
       pair('ATH drawdown', q.athPct != null ? `${q.athPct.toFixed(0)}%` : '—');
-      if (res.fng && res.fng.value != null) {
-        pair('Fear & Greed', `${res.fng.value} ${res.fng.label || ''}${res.fng.ago != null ? ` (was ${res.fng.ago})` : ''}`);
-      }
+      // Fear & Greed used to sit here too. It is market-wide, not a property of
+      // this token, and it now lives once in the strip at the top rather than
+      // being repeated in every per-ticker panel.
       box.appendChild(stats);
 
       const ranges = el('div', 'cr-ranges');
@@ -732,6 +821,11 @@ module.exports.activate = (rhost) => {
     async function reload() {
       colTickers.innerHTML = '';
       colTickers.appendChild(el('div', 'cr-loading', 'reading…'));
+
+      // Not awaited, and deliberately before the early returns below: the strip
+      // is about the market, so a library that cannot be read must not take it
+      // down, and a slow CoinGecko must not hold up the disk listing.
+      paintContext().catch((e) => rhost.log.error('context failed', e));
 
       let res;
       try {

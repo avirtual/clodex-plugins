@@ -46,12 +46,37 @@ documents — the rule is to write a new dated one rather than edit an old one �
 so there is no edit or delete path here. Re-assess is not an exception: it does
 not touch the library, it asks an agent to run the skill, and the agent writes.
 
+## The market strip
+
+Across the top of the overlay, above the three columns: **BTC** and **ETH**
+with their 24h move, and the **Fear & Greed** index with its move against 30
+days ago. It is the market the assessments below were written about, and it
+answers the first question the overlay used to leave hanging — everything else
+here is about one token at a time.
+
+It is filled on open, from `context()`, and it is independent of the library:
+it paints even when the research root cannot be resolved and the columns are
+showing an error, because "what is the market doing" is still answerable then.
+It does not tick while the overlay is open, and the timestamp on the right says
+so — the freshness bound is the open.
+
+The two majors are **fixed CoinGecko ids** (`bitcoin`, `ethereum`), never routed
+through search: they are the two ids in the catalogue that cannot be a guess,
+and a search rank could land on a wrapped fork. Both arrive in one
+`/coins/markets` call, in the order asked for rather than the order returned —
+CoinGecko sorts by market cap, which is BTC then ETH today and is not a promise.
+
+Fear & Greed is coloured in its own five bands rather than the red/green used
+for price. Green would read as "good", and extreme greed is not good; both ends
+of the scale are warm and only the middle is calm.
+
 ## The price header
 
 Above the document: price, 24h/7d/30d change, market cap, FDV, volume, float
-percentage, ATH drawdown, Fear & Greed, and a price chart (30d/90d/1y). It
-follows the selected **ticker**, not the selected document, so clicking through
-a run's findings does not refetch it.
+percentage, ATH drawdown, and a price chart (30d/90d/1y). It follows the
+selected **ticker**, not the selected document, so clicking through a run's
+findings does not refetch it. Fear & Greed is *not* repeated here — it is
+market-wide, not a property of the token, and lives once in the strip above.
 
 It is deliberately **today's** number sitting beside a **dated** assessment.
 Those are different moments, and the header says so and stamps its own.
@@ -246,8 +271,9 @@ from disk as source and evaluated in the page.
 What does **not** cross is the folder picker. `setRoot` takes a caller-supplied
 host path, so it is deliberately left out of the manifest's `surfaces` table and
 answers `plugin method not available on this surface` from the browser. Choose
-the library on the desktop; the browser reads it. The five methods the viewer
-needs — `index`, `doc`, `quote`, `rerun`, `watchRemove` — are marked `"any"`.
+the library on the desktop; the browser reads it. The six methods the viewer
+needs — `index`, `doc`, `quote`, `context`, `rerun`, `watchRemove` — are marked
+`"any"`.
 
 Manifests are read at registration, so a browser box that predates this change
 needs a plugin re-scan or a restart before the calls stop being refused.
@@ -284,9 +310,11 @@ three capability grants — it never reads turn text, thinking, or tool inputs.
   without it — it builds nodes and sets every leaf through `textContent`, and
   renders links as text plus a bare URL rather than as anchors.
 - `market.js` — the only part that reaches the network. Plain Node `fetch`, no
-  dependency, hard timeout, response cap, and single-flight per URL. Every
+  dependency, hard timeout, response cap, and single-flight per URL. Two entry
+  points: `quote()` for one token, `context()` for the market strip. Every
   failure returns a result rather than throwing, because an unreachable quote
-  source is an expected condition here.
+  source is an expected condition here — and `context()` settles its two sources
+  independently, so a dead Fear & Greed still shows the majors and vice versa.
 - `style.css` — all selectors `cr-`-prefixed, since plugin CSS is injected
   unscoped into every window, and every colour is a theme variable. Clodex ships
   light themes as well as dark ones.

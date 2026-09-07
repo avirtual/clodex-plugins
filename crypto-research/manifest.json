@@ -1,7 +1,7 @@
 {
   "id": "crypto-research",
   "name": "Crypto Research",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "hostApi": "1",
   "entry": {
     "engine": "engine.js",
@@ -12,6 +12,7 @@
     "index": "any",
     "doc": "any",
     "quote": "any",
+    "context": "any",
     "rerun": "any",
     "watchRemove": "any"
   },

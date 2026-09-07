@@ -200,17 +200,12 @@ function pctOr(v) {
   return (typeof v === 'number' && Number.isFinite(v)) ? v : null;
 }
 
-async function fetchQuote(id) {
-  const url = `${CG}/coins/markets?vs_currency=usd&ids=${encodeURIComponent(id)}`
+function marketsUrl(ids) {
+  return `${CG}/coins/markets?vs_currency=usd&ids=${ids.map(encodeURIComponent).join(',')}`
     + '&price_change_percentage=7d,30d&sparkline=false';
-  const arr = await getJson(url);
-  if (!Array.isArray(arr)) throw new Error('unexpected response shape from CoinGecko');
+}
 
-  // The check this whole file exists for: a 200 with our id missing means the
-  // id is wrong, NOT that the token has no data.
-  const c = arr.find((x) => x && x.id === id);
-  if (!c) throw new Error(`CoinGecko returned no row for id "${id}" — the id is wrong, not the data missing`);
-
+function mapCoin(c) {
   return {
     id: c.id,
     symbol: String(c.symbol || '').toUpperCase(),
@@ -231,6 +226,18 @@ async function fetchQuote(id) {
   };
 }
 
+async function fetchQuote(id) {
+  const arr = await getJson(marketsUrl([id]));
+  if (!Array.isArray(arr)) throw new Error('unexpected response shape from CoinGecko');
+
+  // The check this whole file exists for: a 200 with our id missing means the
+  // id is wrong, NOT that the token has no data.
+  const c = arr.find((x) => x && x.id === id);
+  if (!c) throw new Error(`CoinGecko returned no row for id "${id}" — the id is wrong, not the data missing`);
+
+  return mapCoin(c);
+}
+
 async function fetchChart(id, range) {
   const spec = RANGES[range] || RANGES['30d'];
   const url = `${CG}/coins/${encodeURIComponent(id)}/market_chart`
@@ -243,18 +250,22 @@ async function fetchChart(id, range) {
 }
 
 async function fetchFng() {
+  // Memoised: the index moves once a day, and both the market strip and
+  // whatever else asks for it would otherwise each spend a request per call.
+  const hit = memGet('fng', FNG_TTL_MS);
+  if (hit) return hit;
   const data = await getJson(`${FNG}/?limit=31`);
   const rows = (data && Array.isArray(data.data)) ? data.data : [];
   if (!rows.length) return null;
   const now = rows[0];
   const then = rows[rows.length - 1];
   const n = (r) => (r && r.value != null ? Number(r.value) : null);
-  return {
+  return memSet('fng', {
     value: n(now),
     label: (now && now.value_classification) || null,
     ago: n(then),
     agoDays: rows.length - 1,
-  };
+  });
 }
 
 /**
@@ -324,4 +335,71 @@ async function quote(opts) {
   }
 }
 
-module.exports = { quote, resolve, resetCache, RANGES, SYMBOL_RE, ID_RE };
+/* ---------------------------------------------------------------- context --- */
+
+/**
+ * Market-wide context: the majors and Fear & Greed, with no ticker selected.
+ *
+ * This is what the overlay shows the moment it opens, before anything has been
+ * clicked — "what is the market doing", not "what is this token doing".
+ *
+ * The majors are FIXED ids, never resolved through /search. `bitcoin` and
+ * `ethereum` are the two ids in the whole catalogue that cannot be a guess, and
+ * routing them through the resolver would spend a request to be told what is
+ * already known — and, worse, could land on a wrapped or forked coin whose
+ * search rank happens to beat the real one. Both come back in ONE
+ * /coins/markets call: this fires on every overlay open, and the free tier
+ * throttles per request, not per id.
+ *
+ * Same three-state discipline as quote(), for the same reason: a refusing
+ * source must not read as a calm market.
+ *
+ *   { state: 'live'  , majors: [...], fng }
+ *   { state: 'stale' , majors: [...], fng, error, cachedAt }
+ *   { state: 'failed', error }
+ */
+const MAJORS = Object.freeze(['bitcoin', 'ethereum']);
+const CONTEXT_TTL_MS = QUOTE_TTL_MS;
+
+async function fetchMajors() {
+  const arr = await getJson(marketsUrl(MAJORS));
+  if (!Array.isArray(arr)) throw new Error('unexpected response shape from CoinGecko');
+  // Asked-for order, not returned order: CoinGecko sorts by market cap, which
+  // is BTC then ETH today and is not a promise. A header whose two columns can
+  // swap places is a header that gets misread.
+  const out = MAJORS.map((id) => arr.find((x) => x && x.id === id)).filter(Boolean).map(mapCoin);
+  if (!out.length) throw new Error('CoinGecko returned no row for bitcoin or ethereum');
+  return out;
+}
+
+async function context(opts) {
+  const { dataDir } = opts || {};
+
+  const fresh = memGet('ctx', CONTEXT_TTL_MS);
+  if (fresh) return fresh;
+
+  // Settled, not all: F&G and the majors are independent sources, and one of
+  // them being down is not a reason to show neither. A `failed` context is only
+  // for the case where BOTH have nothing, which Promise.all could not tell us.
+  const [majorsR, fngR] = await Promise.allSettled([fetchMajors(), fetchFng()]);
+  const majors = majorsR.status === 'fulfilled' ? majorsR.value : null;
+  const fng = fngR.status === 'fulfilled' ? fngR.value : null;
+
+  if (majors) {
+    const payload = { state: 'live', majors, fng };
+    memSet('ctx', payload);
+    if (dataDir) diskWrite(dataDir, 'ctx', 'market', payload);
+    return payload;
+  }
+
+  const why = (majorsR.reason && majorsR.reason.message) || 'majors unavailable';
+  const disk = dataDir ? diskRead(dataDir, 'ctx', 'market') : null;
+  if (disk && disk.value) {
+    // A live F&G still beats the cached one even when the majors are cached.
+    return { ...disk.value, state: 'stale', error: why, cachedAt: disk.at, fng: fng || disk.value.fng };
+  }
+  if (fng) return { state: 'live', majors: [], fng, error: why };
+  return { state: 'failed', error: why };
+}
+
+module.exports = { quote, context, resolve, resetCache, RANGES, MAJORS, SYMBOL_RE, ID_RE };

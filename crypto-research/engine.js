@@ -503,6 +503,15 @@ module.exports.activate = (h) => {
     });
   });
 
+  /**
+   * Market-wide context for the overlay header: BTC/ETH and Fear & Greed.
+   *
+   * Takes no payload and touches no library — it is about the market, not about
+   * this operator's research folder, so it works on a seat whose root is
+   * unresolvable and is served the same to every window.
+   */
+  host.ipc.handle('context', async () => market.context({ dataDir: host.paths.dataDir }));
+
   host.ipc.handle('setRoot', (dir) => {
     const raw = String(dir || '').trim();
     if (!raw) return { ok: false, error: 'no folder given' };

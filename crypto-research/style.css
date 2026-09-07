@@ -74,6 +74,89 @@
 
 .cr-btn:hover { background: var(--sidebar-hover, #1a2744); }
 
+/* ------------------------------------------------------------ market strip */
+
+/*
+ * BTC / ETH / Fear & Greed, under the topbar and above the columns. It is a
+ * fixed-height row that never wraps: it sits between two borders, and a strip
+ * that grows to two lines on a narrow window would push the columns down and
+ * shorten the document pane by the same amount every time.
+ */
+.cr-ctx {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--border, #253253);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.cr-ctx-cell {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.cr-ctx-sym {
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.cr-ctx-price {
+  color: var(--text, #eee);
+  font-size: 13px;
+  font-weight: 600;
+  /* Tabular figures so a price ticking between digits does not shift the row. */
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-ctx-chg {
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-ctx-fng { padding-left: 16px; border-left: 1px solid var(--border, #253253); }
+
+.cr-ctx-fngval {
+  font-size: 13px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/*
+ * The F&G bands are NOT the up/down palette. Green here would say "good", and
+ * extreme greed is the one reading that most often precedes the opposite — so
+ * both ends of the scale are warm, and only the middle is calm.
+ */
+.cr-fng-xfear   { color: var(--error, #e06c75); }
+.cr-fng-fear    { color: var(--warn, #e5c07b); }
+.cr-fng-neutral { color: var(--text, #eee); }
+.cr-fng-greed   { color: var(--warn, #e5c07b); }
+.cr-fng-xgreed  { color: var(--accent, #e94560); }
+.cr-fng-none    { color: var(--text-dim, #949eb1); }
+
+.cr-ctx-fnglab {
+  color: var(--text-dim, #949eb1);
+  font-size: 11px;
+  text-transform: capitalize;
+}
+
+.cr-ctx-stamp,
+.cr-ctx-loading,
+.cr-ctx-failed {
+  margin-left: auto;
+  color: var(--text-dim, #949eb1);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* -------------------------------------------------------------- three cols */
 
 .cr-body {
