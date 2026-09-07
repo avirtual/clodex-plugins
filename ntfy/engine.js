@@ -21,12 +21,53 @@ const BACKOFF_MAX_MS = 60000;
 // operator typed in. 64K is far above any real ntfy message and far below harm.
 const LINE_MAX = 64 * 1024;
 
+// Overridable ONLY so the tests can drive it: the behaviour under test is three
+// 30s timeouts followed by a mode switch, and a suite that waited 90s of real
+// time for it would be a suite nobody runs. Not a setting — it is deliberately
+// absent from the settings dialog and from the README's settings table, because
+// an operator has no way to know a good value and every wrong one presents as
+// this plugin being broken.
+function envMs(name, def) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) && n > 0 ? n : def;
+}
+
 // How often the engine re-reads its settings. It has to poll: the host persists
 // what the settings dialog collects (see README), and there is no hook telling a
 // plugin its settings changed — so a poll is the only way the connection follows
 // a URL the operator just saved. Only `url` is checked, because it is the only
 // setting the *connection* depends on; the routes are read fresh per message.
-const RECONCILE_MS = 5000;
+const RECONCILE_MS = envMs('CLODEX_NTFY_RECONCILE_MS', 5000);
+
+/*
+ * PROXY BUFFERING. A reverse proxy in front of ntfy that buffers responses never
+ * forwards the stream's headers, because the stream never ends — so the socket
+ * sits ESTABLISHED forever and every timeout Node offers by default is on
+ * INACTIVITY, which this is not: the connection is perfectly healthy and
+ * perfectly silent. Nothing fails, so nothing is logged, and the plugin looks
+ * identical to one with no messages to deliver. Observed against an nginx that
+ * answered `/json?poll=1` instantly while holding `/json` open for 20s+.
+ *
+ * Hence an explicit deadline on the RESPONSE HEADERS, which a buffering proxy
+ * withholds and a working server sends immediately, and which is therefore the
+ * one signal that separates the two.
+ */
+const HEADER_TIMEOUT_MS = envMs('CLODEX_NTFY_HEADER_TIMEOUT_MS', 30000);
+
+// Consecutive header timeouts before giving up on streaming. More than one
+// because a single slow response is not a diagnosis; small because each costs a
+// full HEADER_TIMEOUT_MS of silence.
+const HEADER_TIMEOUT_MAX = Math.max(1, Math.round(envMs('CLODEX_NTFY_HEADER_TIMEOUT_MAX', 3)));
+
+// Poll-mode interval. A poll request completes, so it survives the buffering
+// that defeats the stream — this is the fallback that keeps messages flowing
+// while the proxy is misconfigured. Slower than a stream by design: it is the
+// degraded mode, not a second way of doing the same thing.
+const POLL_MS = envMs('CLODEX_NTFY_POLL_MS', 30000);
+
+// A poll response is read whole rather than line by line, so it needs its own
+// bound for the same reason the stream buffer has one.
+const POLL_BODY_MAX = 1024 * 1024;
 
 const TOPIC_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SEAT_RE = /^(?!\.+$)[a-zA-Z0-9._-]{1,64}$/;
@@ -47,10 +88,30 @@ let lastError = null;
 // the engine will not accept reads the reason in the dialog they saved it from
 // — the log line alone is behind a menu they have no reason to open.
 let idleReason = null;
-// The url the live connection was built from. The reconcile poll compares the
-// saved url against THIS, not against a flag: "settings changed" is not
-// observable here, but "the connection no longer matches the settings" is.
-let activeUrl = null;
+/*
+ * The url string the engine last CONFIGURED ITSELF FROM — not the url it is
+ * connected to, and the difference is the whole point. "Settings changed" is not
+ * observable here, so reconcile() compares the saved url against this; it is
+ * therefore written in exactly ONE place, at the top of connect(), and written
+ * there whether the url turned out usable or not.
+ *
+ * Both halves of that matter, and each cost a bug:
+ *
+ *  - Written on the INVALID path too, or an unusable url compares unequal
+ *    forever and reconcile restarts every RECONCILE_MS, logging "topic url
+ *    changed in settings" each time when nothing changed.
+ *  - NOT written by pollOnce(), which reads current settings on every tick: a
+ *    url assigned there is always equal to the one just read, so the comparison
+ *    can never fail and a url saved while polling is never noticed — leaving the
+ *    operator who reads the fallback log line and fixes the url with a plugin
+ *    that has stopped listening for it.
+ */
+let configuredUrl = null;
+// 'stream' or 'poll'. Only ever moves stream -> poll, and only back on a
+// restart — see switchToPolling().
+let mode = 'stream';
+let headerTimeouts = 0;
+let polling = false;   // a poll request is in flight; keeps them from overlapping
 
 function logInfo(msg) {
   try { if (host) host.log.info(msg); } catch (_) {}
@@ -209,13 +270,17 @@ function connect() {
   if (stopped || req) return;
 
   const cfg = readSettings();
+  // Recorded BEFORE the validity check, and for the invalid case too: this is
+  // "what the engine has configured itself from", not "what it is connected to".
+  // An unusable url the operator has not changed is still the url in force.
+  configuredUrl = cfg.url;
+
   const target = parseTopicUrl(cfg.url);
   if (!target) {
     // Validation lives HERE, on read, not on the way in: the settings dialog
     // hands its patch to the host, which persists whatever it is given, so an
     // unusable url can reach storage by a route this plugin does not sit on.
     // Refusing it at the point of use is the check that cannot be bypassed.
-    activeUrl = null;
     idleReason = cfg.url ? 'url not valid; idle' : 'no topic url configured; idle';
     if (!idleLogged) {
       idleLogged = true;
@@ -224,7 +289,6 @@ function connect() {
     return;
   }
   idleReason = null;
-  activeUrl = cfg.url;
 
   const since = readStorage().lastId || 'latest';
   const url = `${target.href}/json?since=${encodeURIComponent(since)}`;
@@ -233,8 +297,16 @@ function connect() {
   if (token) headers.Authorization = `Bearer ${token}`;
 
   let r;
+  let headerTimer = null;
+  const clearHeaderTimer = () => {
+    if (headerTimer) { clearTimeout(headerTimer); timers.delete(headerTimer); headerTimer = null; }
+  };
+
   try {
     r = (target.secure ? https : http).get(url, { headers }, (res) => {
+      // Headers arrived, whatever they say — the far end is not buffering us.
+      clearHeaderTimer();
+      headerTimeouts = 0;
       if (res.statusCode !== 200) {
         res.resume();
         // Logged as well as recorded: a 401 from a server wanting a bearer, or
@@ -280,7 +352,137 @@ function connect() {
   }
 
   req = r;
-  r.on('error', (e) => { if (req === r) endStream(errText(e)); });
+  r.on('error', (e) => { clearHeaderTimer(); if (req === r) endStream(errText(e)); });
+
+  // Deliberately NOT r.setTimeout(): that fires on socket inactivity, and a
+  // buffering proxy holds a socket that is never inactive in the sense Node
+  // means — it is connected, healthy and silent. Only an explicit deadline on
+  // the headers distinguishes "the proxy is swallowing this" from "nobody has
+  // posted to the topic today", which otherwise look the same forever.
+  headerTimer = schedule(() => {
+    if (req !== r) return;               // headers won the race; nothing to do
+    headerTimer = null;
+    headerTimeouts += 1;
+    logError(`ntfy stream sent no headers in ${Math.round(HEADER_TIMEOUT_MS / 1000)}s — proxy buffering?`);
+    endStream('no response headers — proxy buffering?');
+    if (headerTimeouts >= HEADER_TIMEOUT_MAX) switchToPolling();
+  }, HEADER_TIMEOUT_MS);
+}
+
+/**
+ * Give up on the stream and poll instead.
+ *
+ * `?poll=1` makes ntfy answer and close rather than hold the connection open, so
+ * the response completes — which is exactly what a buffering proxy will forward
+ * and a stream is not. Messages keep arriving, just up to POLL_MS late.
+ *
+ * The switch is one-way for the life of the connection: something in the path is
+ * misconfigured, and alternating between a mode that works and one that hangs
+ * for HEADER_TIMEOUT_MS would be worse than committing. `restart()` clears it —
+ * saving a new url, or toggling the plugin, is the operator saying "try again".
+ */
+function switchToPolling() {
+  if (mode === 'poll') return;
+  mode = 'poll';
+  // Drops the reconnect the failed stream just scheduled — that is the point.
+  // It also drops the reconcile timer, which is NOT, so it is re-armed below:
+  // without it the plugin would stop following a url the operator saves, which
+  // is the very thing they would try after reading the log line.
+  clearTimers();
+  logError(`falling back to polling every ${Math.round(POLL_MS / 1000)}s after `
+    + `${headerTimeouts} stream attempts sent no headers — fix the proxy to restore live delivery`);
+  pollOnce();
+  scheduleReconcile();
+}
+
+/**
+ * One `?poll=1` request: the whole backlog since the cursor, as NDJSON, ended.
+ *
+ * Shares `handleLine` with the stream, so dedupe, the cursor and the untrusted
+ * fencing are the same code on both paths — a second copy of that logic is how
+ * one path quietly stops escaping `[agent:`.
+ */
+function pollOnce() {
+  if (stopped || polling) return;
+
+  // NOTE: `configuredUrl` is deliberately NOT written here. This runs every
+  // POLL_MS off settings just read, so assigning it would make reconcile()'s
+  // comparison self-satisfying — always equal, never a change, and a url saved
+  // while polling never picked up. connect() is the one writer.
+  const cfg = readSettings();
+  const target = parseTopicUrl(cfg.url);
+  if (!target) {
+    idleReason = cfg.url ? 'url not valid; idle' : 'no topic url configured; idle';
+    schedulePoll();
+    return;
+  }
+  idleReason = null;
+
+  const since = readStorage().lastId || 'latest';
+  const url = `${target.href}/json?poll=1&since=${encodeURIComponent(since)}`;
+  const headers = { Accept: 'application/x-ndjson' };
+  const token = process.env[TOKEN_ENV];
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  polling = true;
+  const done = (err) => {
+    if (!polling) return;
+    polling = false;
+    connected = !err;
+    if (err) lastError = err; else lastError = null;
+    schedulePoll();
+  };
+
+  let r;
+  try {
+    r = (target.secure ? https : http).get(url, { headers }, (res) => {
+      if (res.statusCode !== 200) {
+        res.resume();
+        const why = `ntfy responded ${res.statusCode}`;
+        logError(`${why} — polling again in ${Math.round(POLL_MS / 1000)}s`);
+        done(why);
+        return;
+      }
+      res.setEncoding('utf8');
+      let body = '';
+      let over = false;
+      res.on('data', (chunk) => {
+        if (over) return;
+        body += chunk;
+        if (body.length > POLL_BODY_MAX) {
+          over = true;
+          body = '';
+          logError(`poll response exceeded ${POLL_BODY_MAX} bytes — discarding it`);
+          try { res.destroy(); } catch (_) {}
+          done('oversized poll response');
+        }
+      });
+      res.on('end', () => {
+        if (over) return;
+        for (const line of body.split('\n')) {
+          try { handleLine(line, target.topic); } catch (e) { logError(`message handling failed: ${errText(e)}`); }
+        }
+        done(null);
+      });
+      res.on('error', (e) => done(errText(e)));
+    });
+  } catch (e) {
+    done(errText(e));
+    return;
+  }
+
+  // A poll DOES complete, so an ordinary inactivity timeout is the right tool
+  // here — unlike the stream, where it never fires.
+  r.setTimeout(HEADER_TIMEOUT_MS, () => {
+    try { r.destroy(); } catch (_) {}
+    done('poll timed out');
+  });
+  r.on('error', (e) => done(errText(e)));
+}
+
+function schedulePoll() {
+  if (stopped || mode !== 'poll') return;
+  schedule(pollOnce, POLL_MS);
 }
 
 function restart() {
@@ -292,6 +494,12 @@ function restart() {
   connected = false;
   attempt = 0;
   idleLogged = false;
+  // A restart is the operator acting — a new url, or the plugin toggled off and
+  // on. Streaming is worth one more try: the proxy they were told to fix may be
+  // the thing they just fixed.
+  mode = 'stream';
+  headerTimeouts = 0;
+  polling = false;
   if (!stopped) connect();
   if (!stopped) scheduleReconcile();
 }
@@ -313,7 +521,7 @@ function restart() {
 function reconcile() {
   if (stopped) return;
   const saved = readSettings().url;
-  if (saved !== (activeUrl == null ? '' : activeUrl)) {
+  if (saved !== (configuredUrl == null ? '' : configuredUrl)) {
     logInfo('topic url changed in settings; reconnecting');
     idleLogged = false;
     restart();
@@ -352,7 +560,10 @@ module.exports.activate = (h) => {
   lastEventAt = null;
   lastError = null;
   idleReason = null;
-  activeUrl = null;
+  configuredUrl = null;
+  mode = 'stream';
+  headerTimeouts = 0;
+  polling = false;
 
   // The plugin raises operator inbox notes, which is its whole point, so a host
   // without that surface cannot run it. Named rather than versioned: the
@@ -372,6 +583,10 @@ module.exports.activate = (h) => {
     // failure and is cleared by a successful connect.
     idle: idleReason,
     error: lastError,
+    // 'stream' normally, 'poll' after the stream was given up on. Surfaced
+    // because a plugin that is delivering messages 30s late is working, and the
+    // dialog is where an operator would look to find out why.
+    mode,
   }));
 
   connect();
@@ -386,7 +601,8 @@ module.exports.deactivate = () => {
     req = null;
   }
   connected = false;
-  activeUrl = null;
+  configuredUrl = null;
+  polling = false;
   logInfo('deactivated');
   host = null;
 };

@@ -71,10 +71,20 @@ function ntfyServer() {
     state.requests.push({
       path: u.pathname,
       since: u.searchParams.get('since'),
+      // Recorded so a test can tell a STREAM request from a poll: both land
+      // here, and "the plugin contacted this server" is not the same claim as
+      // "the plugin is streaming from this server".
+      poll: u.searchParams.get('poll') === '1',
       accept: req.headers.accept,
       auth: req.headers.authorization,
     });
     res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+    // Node holds headers back until the first body write, so writeHead() alone
+    // makes this fixture indistinguishable from the buffering proxy below — a
+    // WORKING server flushes them immediately, which is exactly the difference
+    // the header timeout keys on. Without this the plugin's stream to a healthy
+    // server that simply has no messages yet would time out.
+    res.flushHeaders();
     state.streams.push(res);
     res.on('close', () => { state.closes += 1; });
   });
@@ -474,6 +484,33 @@ test('an unusable url that reached storage is refused on READ, and reported as i
   await srv.close();
 });
 
+test('an unusable url does not put the reconcile poll into a restart loop', { skip: SKIP }, async () => {
+  const prev = process.env.CLODEX_NTFY_RECONCILE_MS;
+  process.env.CLODEX_NTFY_RECONCILE_MS = '100';
+  const h = makeHost({ settings: { url: 'ftp://ntfy.example.com/clodex', routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+
+    // ENTER: it really did evaluate the url and refuse it — otherwise the
+    // quiet assertion below is true of a plugin that never started.
+    assert.ok(await until(() => h.logged.some((l) => /url not valid/.test(l))),
+      'the unusable url was refused');
+
+    // ~15 reconcile ticks. The bug this pins: reconcile compares the saved url
+    // against the one the engine configured itself from, and if the invalid
+    // path leaves that unset, every tick sees a "change", restarts, and logs.
+    // Nothing has changed, so nothing further should be said.
+    const after = h.logged.length;
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(h.logged.length, after,
+      `a url nobody changed produced ${h.logged.length - after} further log lines`);
+  } finally {
+    h.cleanup();
+    if (prev === undefined) delete process.env.CLODEX_NTFY_RECONCILE_MS;
+    else process.env.CLODEX_NTFY_RECONCILE_MS = prev;
+  }
+});
+
 test('the engine follows a url saved by the host, with no call telling it so', { skip: SKIP }, async () => {
   const srv = ntfyServer();
   const url = await srv.listen();
@@ -568,6 +605,194 @@ test('a non-200 is logged, not just recorded', { skip: SKIP }, async () => {
   } finally {
     h.cleanup();
     await new Promise((r) => server.close(r));
+  }
+});
+
+// ── a buffering proxy ──────────────────────────────────────────────────────
+// The failure these cover has no error in it: nginx in front of ntfy buffers
+// the response, so the stream's headers never arrive, the socket sits
+// ESTABLISHED and healthy, and the plugin looks exactly like one with no
+// messages to deliver. Every inactivity timeout Node offers stays silent,
+// because the connection is not inactive — which is why the fixture below
+// accepts the request and then does NOTHING, rather than erroring or hanging up.
+
+// Accepts connections and withholds headers on /json, exactly as a buffering
+// proxy does — but answers /json?poll=1 normally, which is what makes the
+// fallback worth having and what was observed against the real nginx.
+function bufferingProxy({ backlog = [] } = {}) {
+  const state = { streamRequests: [], pollRequests: [], held: [] };
+  const server = http.createServer((req, res) => {
+    const u = new URL(req.url, 'http://localhost');
+    if (u.searchParams.get('poll') === '1') {
+      state.pollRequests.push({ since: u.searchParams.get('since') });
+      res.writeHead(200, { 'Content-Type': 'application/x-ndjson' });
+      res.end(backlog.map((o) => JSON.stringify(o)).join('\n'));
+      return;
+    }
+    // The stream: connection accepted, headers never written, socket kept open.
+    state.streamRequests.push({ since: u.searchParams.get('since') });
+    state.held.push(res);
+  });
+  return {
+    state,
+    async listen() {
+      await new Promise((r) => server.listen(0, '127.0.0.1', r));
+      return `http://127.0.0.1:${server.address().port}/clodex`;
+    },
+    close() {
+      for (const r of state.held) { try { r.destroy(); } catch (_) { /* ignore */ } }
+      return new Promise((r) => server.close(r));
+    },
+  };
+}
+
+test('a stream that never sends headers times out and says so', { skip: SKIP }, async () => {
+  const prev = process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS;
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS = '300';
+  const srv = bufferingProxy();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+
+    // ENTER: the request ARRIVED and is being held. Without this, the timeout
+    // below would also pass against a server that was never reached at all.
+    assert.ok(await until(() => srv.state.streamRequests.length === 1),
+      'the plugin connected and the far end is holding the response');
+    assert.equal(srv.state.held.length, 1, 'headers were never sent');
+
+    assert.ok(await until(() => h.logged.some((l) => /sent no headers in/.test(l))),
+      'the silence was logged rather than waited on forever');
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.match(st.error, /proxy buffering/, 'and status.get names the likely cause');
+  } finally {
+    h.cleanup();
+    await srv.close();
+    if (prev === undefined) delete process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS;
+    else process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS = prev;
+  }
+});
+
+test('after repeated header timeouts it falls back to polling, and messages flow again', { skip: SKIP }, async () => {
+  const env = {
+    CLODEX_NTFY_HEADER_TIMEOUT_MS: process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS,
+    CLODEX_NTFY_HEADER_TIMEOUT_MAX: process.env.CLODEX_NTFY_HEADER_TIMEOUT_MAX,
+    CLODEX_NTFY_POLL_MS: process.env.CLODEX_NTFY_POLL_MS,
+  };
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS = '200';
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MAX = '2';
+  process.env.CLODEX_NTFY_POLL_MS = '200';
+
+  const srv = bufferingProxy({ backlog: [MESSAGE] });
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+
+    assert.ok(await until(() => h.logged.some((l) => /falling back to polling/.test(l)), 10000),
+      'the mode switch was logged once it gave up on the stream');
+
+    // The point of the fallback: the message the stream could never deliver
+    // arrives anyway, through a request that completes.
+    assert.ok(await until(() => h.notes.length === 1, 5000),
+      'a message arrived over the poll path');
+    assert.ok(srv.state.pollRequests.length >= 1, 'and it came from a ?poll=1 request');
+
+    // Shared handling, not a second copy: the fence and the escaping are the
+    // same code, so the poll path cannot quietly stop applying them.
+    const body = h.notes[0].body;
+    assert.ok(body.includes('---- END UNTRUSTED ----'), 'the poll path fences too');
+    assert.ok(!/(^|[^\\])\[agent:/.test(body), 'and escapes intents identically');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.mode, 'poll', 'status.get reports the degraded mode');
+  } finally {
+    h.cleanup();
+    await srv.close();
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});
+
+test('polling advances the cursor, so a message is not re-delivered', { skip: SKIP }, async () => {
+  const env = {
+    CLODEX_NTFY_HEADER_TIMEOUT_MS: process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS,
+    CLODEX_NTFY_HEADER_TIMEOUT_MAX: process.env.CLODEX_NTFY_HEADER_TIMEOUT_MAX,
+    CLODEX_NTFY_POLL_MS: process.env.CLODEX_NTFY_POLL_MS,
+  };
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS = '200';
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MAX = '1';
+  process.env.CLODEX_NTFY_POLL_MS = '150';
+
+  // The SAME message on every poll, as a server would return until the cursor
+  // moves past it. Two notes here would mean the poll path is not deduping.
+  const srv = bufferingProxy({ backlog: [MESSAGE] });
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => h.notes.length === 1, 10000), 'the message arrived');
+
+    // ENTER: several polls really happened, so the duplicate really was offered
+    // again — otherwise "no second note" is true of a poll that never repeated.
+    assert.ok(await until(() => srv.state.pollRequests.length >= 3, 5000),
+      'the server was polled repeatedly and re-offered the same message');
+
+    assert.equal(h.notes.length, 1, 'the repeat raised no second note');
+    const last = srv.state.pollRequests[srv.state.pollRequests.length - 1];
+    assert.equal(last.since, 'm1', 'and the cursor moved to the handled id');
+  } finally {
+    h.cleanup();
+    await srv.close();
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
+});
+
+test('a url saved while polling is still picked up', { skip: SKIP }, async () => {
+  const env = {
+    CLODEX_NTFY_HEADER_TIMEOUT_MS: process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS,
+    CLODEX_NTFY_HEADER_TIMEOUT_MAX: process.env.CLODEX_NTFY_HEADER_TIMEOUT_MAX,
+    CLODEX_NTFY_POLL_MS: process.env.CLODEX_NTFY_POLL_MS,
+  };
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MS = '200';
+  process.env.CLODEX_NTFY_HEADER_TIMEOUT_MAX = '1';
+  process.env.CLODEX_NTFY_POLL_MS = '200';
+
+  // Starts pointed at a buffering proxy, ends pointed at a working server.
+  const bad = bufferingProxy();
+  const badUrl = await bad.listen();
+  const good = ntfyServer();
+  const goodUrl = await good.listen();
+  const h = makeHost({ settings: { url: badUrl, routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => h.logged.some((l) => /falling back to polling/.test(l)), 10000),
+      'it is in poll mode');
+
+    // switchToPolling() calls clearTimers(), which kills the reconnect it means
+    // to kill AND the reconcile timer it does not. Re-arming that is what this
+    // asserts: an operator who reads the log line and fixes the url must not
+    // find the plugin has stopped listening for it.
+    await h.engine.dispatch('_host', 'settings.set', ['ntfy', { url: goodUrl }], 'web');
+
+    // A STREAM request specifically. Poll requests reach the new url too — the
+    // poll loop re-reads settings every tick — so "the server was contacted" is
+    // true almost immediately and would pass this over a plugin still stuck in
+    // poll mode. The stream request is what only reconcile can produce.
+    assert.ok(await until(() => good.state.requests.some((r) => !r.poll), 15000),
+      'the new url was noticed and STREAMED from, not just polled');
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.mode, 'stream', 'and a restart gives streaming another chance');
+  } finally {
+    h.cleanup();
+    await bad.close();
+    await good.close();
+    for (const [k, v] of Object.entries(env)) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
   }
 });
 

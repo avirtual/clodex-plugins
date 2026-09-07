@@ -1,7 +1,7 @@
 {
   "id": "ntfy",
   "name": "ntfy",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "hostApi": "1",
   "entry": { "engine": "engine.js", "renderer": "renderer.js" },
   "enabledByDefault": false,

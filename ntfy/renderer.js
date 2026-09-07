@@ -38,7 +38,14 @@ module.exports.activate = (rhost) => {
     // connected": an unset or unusable url is a thing the operator can fix in
     // the field directly above this line, and calling it "not connected" sends
     // them looking at the network instead.
-    const bits = [res.idle ? res.idle : (res.connected ? 'connected' : 'not connected')];
+    // Poll mode is reported as a state of its own rather than as plain
+    // "connected": it IS working, so an error would be wrong, but it is
+    // delivering late for a fixable reason and saying nothing would leave that
+    // invisible — which is the whole failure this mode exists to escape.
+    const live = res.mode === 'poll'
+      ? 'polling (proxy buffering the stream — see the plugin log)'
+      : (res.connected ? 'connected' : 'not connected');
+    const bits = [res.idle ? res.idle : live];
     if (res.lastEventAt) bits.push(`last message ${new Date(res.lastEventAt).toLocaleString()}`);
     if (res.lastId) bits.push(`resuming after id ${res.lastId}`);
     if (res.error) bits.push(`error: ${res.error}`);

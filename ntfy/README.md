@@ -91,6 +91,41 @@ into a settings field, so a server that sends none would otherwise grow the
 buffer until the app dies. Passing the cap drops the stream and reconnects; the
 cursor is untouched, so nothing already delivered is lost.
 
+### A buffering proxy, and the poll fallback
+
+The failure worth knowing about has no error in it. A reverse proxy configured
+to buffer responses never forwards the stream's headers — the stream never ends,
+so there is nothing to buffer *to* — and the socket then sits `ESTABLISHED`
+forever. Every timeout Node offers is on **inactivity**, which this is not: the
+connection is healthy and silent. Nothing fails, nothing is logged, and the
+plugin is indistinguishable from one with no messages to deliver.
+
+Two things follow from that:
+
+- **A 30s deadline on the response headers.** A working server sends them
+  immediately and a buffering proxy withholds them, so this is the one signal
+  that separates the two. On expiry: `ntfy stream sent no headers in 30s —
+  proxy buffering?`, then the normal backoff.
+- **After three of those, it falls back to polling** `?poll=1` every 30 seconds
+  and says so once. A poll request *completes*, so it survives the buffering
+  that defeats the stream. Messages keep arriving, up to 30s late; `status.get`
+  reports `mode: "poll"` and the settings dialog shows it.
+
+The fallback is one-way for the life of the connection — alternating between a
+mode that works and one that hangs for 30s would be worse than committing.
+Saving a URL, or toggling the plugin off and on, puts it back on streaming: that
+is the operator saying they have fixed the proxy.
+
+If you see poll mode, the fix is in nginx, not here:
+
+```
+proxy_buffering off;
+```
+
+Both paths share `handleLine`, so dedupe, the cursor and the untrusted fencing
+are the same code either way — a second copy is how one path quietly stops
+escaping `[agent:`.
+
 ## Tests
 
 `test/ntfy-plugin.test.js`, driven through the real plugin host engine against a
@@ -106,5 +141,12 @@ CLODEX_REPO=/path/to/clodex node --test ntfy/test/*.test.js
 The host engine is not part of this repo, so the suite finds a Clodex checkout
 (`$CLODEX_REPO`, then `~/projects/clodex`) and **skips with a reason** when there
 is none, rather than failing on a machine that has no checkout to test against.
+
+The timings are overridable by environment variable
+(`CLODEX_NTFY_RECONCILE_MS`, `CLODEX_NTFY_HEADER_TIMEOUT_MS`,
+`CLODEX_NTFY_HEADER_TIMEOUT_MAX`, `CLODEX_NTFY_POLL_MS`) so the suite can drive
+three 30-second timeouts in under a second. They are **not settings** and are
+absent from the dialog on purpose: an operator has no way to know a good value,
+and every wrong one presents as this plugin being broken.
 
 [plugin-api.md §2.2]: https://github.com/avirtual/clodex/blob/master/plugins/plugin-api.md
