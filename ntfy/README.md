@@ -23,7 +23,7 @@ Settings ▸ Plugins ▸ ntfy.
 | Also DM seat | A session name to inject a one-line summary into. Empty for none; a dead or unknown seat is logged and skipped. |
 | Only from | Comma-separated tag or title **prefixes**, e.g. `github`. Empty accepts everything. |
 | Ignore titles containing | Comma-separated, case-insensitive substrings, e.g. `labeled, unlabeled`. |
-| Mute comments by | Comma-separated GitHub logins, e.g. `avirtual`. Their **comments** are dropped; opens, closes and labels still arrive. |
+| Mute comments by | Comma-separated GitHub logins, e.g. `avirtual`. Their **comments** are dropped; opens, closes and labels still arrive. Empty by default — nothing in a message identifies your account, so this cannot be inferred. The author is read from the `<login>: ` prefix on the body's **first line**, which ntfy's template writes; there is no author field to match on. See [Filtering](#filtering). |
 
 A private server wanting a bearer token reads it from the environment:
 
