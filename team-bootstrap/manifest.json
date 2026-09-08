@@ -1,0 +1,9 @@
+{
+  "id": "team-bootstrap",
+  "name": "Team Bootstrap",
+  "version": "0.1.0",
+  "hostApi": "1",
+  "entry": {},
+  "enabledByDefault": false,
+  "announce": "Turns \"I want a project that does X and I need a team\" into a working team: /team-bootstrap:team-bootstrap interviews the operator, then drives the team intents in the order that works — create, spawn the lead, and brief that lead with the role and file verbs only it may run. Content only — no engine, no renderer, no intent verb. Needs the privileged team-create intent on the interviewing seat."
+}
