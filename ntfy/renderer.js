@@ -6,22 +6,36 @@ module.exports.activate = (rhost) => {
 
   const alive = () => !disposed;
 
+  // The row is a two-column grid — label, then field — and the label's text and
+  // its input are therefore SIBLINGS rather than the input sitting inside the
+  // label. `display: contents` on the label keeps both as direct grid items, so
+  // the columns line up across every row while clicking the text still focuses
+  // the field. Nesting the input inside the label and styling that instead is
+  // what produced the ragged left edge: each row sized its own label.
   function field(bodyEl, key, label, hint, type) {
     const row = document.createElement('div');
     row.className = 'ntfy-settings-row';
     const lab = document.createElement('label');
     lab.className = 'ntfy-settings-label';
-    lab.textContent = label;
+    const text = document.createElement('span');
+    text.textContent = label;
     const input = document.createElement('input');
     input.type = type;
     input.className = 'ntfy-settings-input';
     input.setAttribute('data-ntfy-key', key);
+    lab.appendChild(text);
     lab.appendChild(input);
     row.appendChild(lab);
     if (hint) {
       const h = document.createElement('div');
       h.className = 'ntfy-settings-hint';
       h.textContent = hint;
+      // The hint is described BY the input rather than merely placed near it,
+      // so a screen reader reaching the field reads the explanation with it
+      // instead of stranding it as loose text between two controls.
+      const hintId = `ntfy-hint-${key}`;
+      h.id = hintId;
+      input.setAttribute('aria-describedby', hintId);
       row.appendChild(h);
     }
     bodyEl.appendChild(row);
@@ -84,8 +98,8 @@ module.exports.activate = (rhost) => {
       inbox.checked = routes.inbox === undefined ? true : !!routes.inbox;
 
       const seat = field(bodyEl, 'seat', 'Also DM seat',
-        'A session name to DM each message to, or empty for none. At most 10 messages every 10 minutes '
-        + 'reach a seat, as a one-line summary; the inbox always gets the full text.', 'text');
+        'A session name, or empty for none. A seat gets a one-line summary, at most 10 every '
+        + '10 minutes; the inbox always gets the full text.', 'text');
       seat.value = typeof routes.seat === 'string' ? routes.seat : '';
 
       const allow = field(bodyEl, 'allowFrom', 'Only from',
@@ -97,8 +111,8 @@ module.exports.activate = (rhost) => {
       ignore.value = asList(v.ignoreTitles);
 
       const mute = field(bodyEl, 'muteAuthors', 'Mute comments by',
-        'Comma-separated GitHub logins, e.g. avirtual. Their COMMENTS are dropped; opens, '
-        + 'closes and labels still arrive. Set this to your own account if an agent comments from it.', 'text');
+        'Comma-separated GitHub logins. Only their comments are dropped — opens, closes and '
+        + 'labels still arrive. Set your own login here if an agent comments from your account.', 'text');
       mute.value = asList(v.muteAuthors);
 
       statusEl = document.createElement('div');

@@ -1376,3 +1376,47 @@ test('the token env var name appears exactly once in the plugin', { skip: SKIP }
   }
   assert.equal(total, 1, 'one literal, read in one place — a second is a call site that can drift');
 });
+
+// The host injects style.css VERBATIM into the shared document — not scoped,
+// not prefixed (plugin-api.md §13). A bare `label {}` or `input {}` here would
+// restyle core's own dialogs and every other plugin's settings, and it would do
+// it silently: nothing fails, the app just looks wrong somewhere else. That is
+// invisible to every other test in this file, so it is pinned here.
+test('the stylesheet only ever selects this plugin\'s own classes', { skip: SKIP }, () => {
+  const css = fs.readFileSync(path.join(PLUGIN_DIR, 'style.css'), 'utf8');
+  // ENTER: an empty or unreadable file would pass every assertion below over
+  // nothing, which is the failure mode this whole test exists to avoid.
+  assert.ok(css.length > 200, 'the stylesheet was read');
+
+  // Comments carry prose about colours and selectors, so they are stripped
+  // before the scan rather than matched against — otherwise the test grades the
+  // documentation instead of the code.
+  const code = css.replace(/\/\*[\s\S]*?\*\//g, '');
+
+  const selectors = code
+    .split('}')
+    .map((block) => block.split('{')[0].trim())
+    .filter(Boolean)
+    .flatMap((sel) => sel.split(',').map((s) => s.trim()))
+    .filter(Boolean);
+  assert.ok(selectors.length >= 5, 'the selectors were parsed, not silently empty');
+
+  for (const sel of selectors) {
+    assert.ok(/^\.ntfy-settings-[a-z-]+/.test(sel),
+      `every selector must start with this plugin's own class, got ${JSON.stringify(sel)}`);
+  }
+
+  // Themes here include light ones, so a literal colour is legible in some and
+  // invisible in others. Every colour must come from a host token.
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(code), 'no hardcoded colours — use var(--token)');
+  assert.ok(!/\b(?:rgb|hsl)a?\(/.test(code), 'no literal rgb/hsl colours — use var(--token)');
+  assert.ok(/var\(--/.test(code), 'colours come from host design tokens');
+});
+
+test('the manifest declares the stylesheet, or it is never injected', { skip: SKIP }, () => {
+  // A style.css that no manifest names is a file the host never reads: the
+  // panel would silently render unstyled, which looks exactly like CSS that
+  // failed to apply.
+  assert.equal(MANIFEST.style, 'style.css', 'the stylesheet is declared');
+  assert.ok(fs.existsSync(path.join(PLUGIN_DIR, MANIFEST.style)), 'and the declared file exists');
+});

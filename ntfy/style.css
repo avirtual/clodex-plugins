@@ -1,0 +1,81 @@
+/*
+ * ntfy settings panel.
+ *
+ * The host injects this VERBATIM into the shared document — no scoping, no
+ * prefixing (plugin-api.md §13). Every selector here is therefore under
+ * `.ntfy-settings-*`, and the panel is reached through `[data-plugin-section]`
+ * rather than by styling `input` or `label` bare: a rule like `label { display:
+ * block }` would reach the whole app, including core's own dialogs and every
+ * other plugin's settings.
+ *
+ * Colours are all design tokens. Clodex ships light themes as well as dark
+ * ones, so a hardcoded `#eee` here is invisible on half of them — this panel
+ * lives inside a dialog whose background changes underneath it.
+ */
+
+.ntfy-settings-row {
+  display: grid;
+  /* The label column is sized to the longest label ("Ignore titles containing")
+     so every input starts at the same x. auto-fitting each row independently is
+     what produced the ragged left edge the fields had before. */
+  grid-template-columns: 150px 1fr;
+  gap: 2px 10px;
+  align-items: baseline;
+  margin-bottom: 10px;
+}
+
+/* The label is a <label> wrapping its input, so clicking the text focuses the
+   field — this splits the two back apart visually without giving that up. */
+.ntfy-settings-label {
+  display: contents;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.ntfy-settings-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.ntfy-settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* A checkbox must not stretch across the field column: `width: 100%` on one
+   produces a comically wide box in every engine. */
+.ntfy-settings-input[type="checkbox"] {
+  width: auto;
+  justify-self: start;
+  margin: 0;
+  padding: 0;
+}
+
+/* The hint sits in the field column, under its input rather than under the
+   label — it explains the input, and starting it at the panel's left edge is
+   what made it read as a caption for the NEXT row. */
+.ntfy-settings-hint {
+  grid-column: 2;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+/* The live connection line. Set apart with a rule above it because it is the
+   one line here that is not a setting: it reports what the engine currently
+   thinks, and it was previously indistinguishable from the hint above it. */
+.ntfy-settings-status {
+  margin-top: 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
