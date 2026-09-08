@@ -261,6 +261,10 @@ function readSettings() {
     // Lowercased once, here, so the case-insensitive match downstream is a
     // plain `includes` rather than a regex built from operator input.
     ignoreTitles: readList(s.ignoreTitles).map((x) => x.toLowerCase()),
+    // Lowercased for the same reason, and because GitHub logins are themselves
+    // case-insensitive: `avirtual` and `AVirtual` are one account, so treating
+    // them as two would let the mute miss the very comments it was set for.
+    muteAuthors: readList(s.muteAuthors).map((x) => x.replace(/^@/, '').toLowerCase()),
   };
 }
 
@@ -388,6 +392,33 @@ function seatText(ev, topic, noteId) {
   return byteLen(text) <= SEAT_MAX_BYTES ? text : clipBytes(text, SEAT_MAX_BYTES);
 }
 
+/*
+ * Who wrote a message, or null if nobody did.
+ *
+ * There is no author FIELD to read. ntfy delivers a title and a body of text —
+ * the GitHub webhook JSON, `sender.login` and all, is consumed by ntfy's own
+ * template long before this plugin sees anything. What survives is a convention:
+ * the template prefixes a comment's body with `<login>: `, and this is the only
+ * place an author appears.
+ *
+ * That prefix is written by the template, NOT by the commenter — a commenter
+ * controls only the text after it. So the first line cannot be forged into
+ * another account's name, which is what makes matching on it safe.
+ *
+ * The shape of a GitHub login is the whole defence against matching prose:
+ * alphanumerics and hyphens, 39 max, and a colon followed by WHITESPACE. A body
+ * that is a bare `https://github.com/...` — which is exactly what every state
+ * change sends — must not parse as an author called `https`, and it does not,
+ * because `://` has no space after the colon.
+ */
+const AUTHOR_RE = /^([A-Za-z0-9][A-Za-z0-9-]{0,38}):\s/;
+
+function authorOf(ev) {
+  const first = String(ev.message == null ? '' : ev.message).split('\n').find((l) => l.trim()) || '';
+  const m = AUTHOR_RE.exec(first.trim());
+  return m ? m[1].toLowerCase() : null;
+}
+
 const digest = (ev) => crypto.createHash('sha256')
   // NUL separates the fields, written as an escape rather than a literal: a raw
   // one makes this file 'data' to grep and every source-scanning tool goes
@@ -413,6 +444,17 @@ function dropReason(ev, cfg, now) {
     const cands = tags.concat([foldTitle(ev.title)]);
     const ok = cfg.allowFrom.some((p) => cands.some((c) => c.startsWith(p)));
     if (!ok) return 'allowFrom';
+  }
+
+  // muteAuthors: an agent commenting from the operator's own account hears
+  // itself, once per comment it posts. Dropping on AUTHORSHIP rather than on
+  // event type is what keeps state changes: a close, an open or a label carries
+  // no author line at all (its body is the bare issue URL), so it cannot match
+  // here and survives without this filter knowing anything about GitHub's event
+  // vocabulary — which is a list that would otherwise need keeping in sync.
+  if (cfg.muteAuthors.length) {
+    const who = authorOf(ev);
+    if (who && cfg.muteAuthors.includes(who)) return 'mutedAuthor';
   }
 
   // ignoreTitles: case-insensitive substrings. Label churn (`labeled`,

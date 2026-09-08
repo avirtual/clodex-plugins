@@ -23,6 +23,7 @@ Settings ▸ Plugins ▸ ntfy.
 | Also DM seat | A session name to inject a one-line summary into. Empty for none; a dead or unknown seat is logged and skipped. |
 | Only from | Comma-separated tag or title **prefixes**, e.g. `github`. Empty accepts everything. |
 | Ignore titles containing | Comma-separated, case-insensitive substrings, e.g. `labeled, unlabeled`. |
+| Mute comments by | Comma-separated GitHub logins, e.g. `avirtual`. Their **comments** are dropped; opens, closes and labels still arrive. |
 
 A private server wanting a bearer token reads it from the environment:
 
@@ -70,10 +71,29 @@ Evaluated before anything is routed, in this order:
    equality because tags carry suffixes: `github` matches `github-pr`. Drops are
    counted and reported to the log at most once an hour — silence would be
    wrong, because a filter that matches nothing looks exactly like a dead topic.
-2. **Ignore titles containing** — case-insensitive substrings, dropped silently.
+2. **Mute comments by** — an agent commenting from the operator's own account
+   hears itself, once per comment it posts. The motivating case is exactly that:
+   four comments and a close on one issue woke a lead agent six times, and the
+   close was the only one of the six that carried information.
+
+   The filter drops on **authorship**, not on event type, and that is what keeps
+   the close. A comment's body begins `<login>: ` — and a state change carries no
+   author line at all, its body being the bare issue URL — so opens, closes and
+   labels cannot match here and survive without this plugin holding a list of
+   GitHub's event verbs to keep in sync.
+
+   There is no author *field* to read. ntfy's template consumes the webhook JSON,
+   `sender.login` and all, long before the plugin sees anything; that prefix is
+   the only trace of an author that survives. It is written by the **template**,
+   not by the commenter, which is what makes matching on it safe — a commenter
+   controls only the text after it. The author is therefore taken from **line
+   one or nowhere**: a state change embeds the issue body, so scanning every line
+   would let whoever opened an issue plant `avirtual: ` inside their report and
+   permanently suppress the closes and labels for it.
+3. **Ignore titles containing** — case-insensitive substrings, dropped silently.
    Label churn (`labeled`, `unlabeled`) is the motivating case: high volume, no
    information, and the operator has already said they do not want to hear it.
-3. **Duplicate collapse** — the same title and body as any of the last 20 routed
+4. **Duplicate collapse** — the same title and body as any of the last 20 routed
    messages within 10 minutes. The id dedupe cannot do this: a sender
    republishing the same text gets a fresh id every time. Outside the window the
    same text is news again, so a nightly build reporting the same result
@@ -84,7 +104,7 @@ routed messages would re-fetch every filtered one on the next reconnect, so a
 well-filtered topic would replay its backlog forever and the filters would cost
 more work the better they worked.
 
-Both lists are parsed in the **engine**, on read, and accept either a
+All three lists are parsed in the **engine**, on read, and accept either a
 comma-separated string (what the dialog writes) or an array (what a hand-edited
 `ui-settings.json` holds). Same reason the URL is validated on read: `_host`'s
 `settings.set` answers on both surfaces and can write any plugin's key, so the

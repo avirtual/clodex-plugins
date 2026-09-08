@@ -96,6 +96,11 @@ module.exports.activate = (rhost) => {
         'Comma-separated, case-insensitive, e.g. labeled, unlabeled. Matching messages are dropped silently.', 'text');
       ignore.value = asList(v.ignoreTitles);
 
+      const mute = field(bodyEl, 'muteAuthors', 'Mute comments by',
+        'Comma-separated GitHub logins, e.g. avirtual. Their COMMENTS are dropped; opens, '
+        + 'closes and labels still arrive. Set this to your own account if an agent comments from it.', 'text');
+      mute.value = asList(v.muteAuthors);
+
       statusEl = document.createElement('div');
       statusEl.className = 'ntfy-settings-status';
       statusEl.textContent = 'Checking…';
@@ -121,10 +126,11 @@ module.exports.activate = (rhost) => {
       const seatEl = get('seat');
       const allowEl = get('allowFrom');
       const ignoreEl = get('ignoreTitles');
+      const muteEl = get('muteAuthors');
       // A missing field means the form is not the one rendered above, and a
       // patch built from defaults would then quietly overwrite real settings
       // with them. Save nothing instead.
-      if (!urlEl || !inboxEl || !seatEl || !allowEl || !ignoreEl) return null;
+      if (!urlEl || !inboxEl || !seatEl || !allowEl || !ignoreEl || !muteEl) return null;
       // The two lists are handed over as the raw strings they were typed as.
       // Splitting them here would put the parse in two places — the engine has
       // to do it anyway, since it must cope with values that never came through
@@ -137,6 +143,7 @@ module.exports.activate = (rhost) => {
         },
         allowFrom: String(allowEl.value).trim(),
         ignoreTitles: String(ignoreEl.value).trim(),
+        muteAuthors: String(muteEl.value).trim(),
       };
     },
   });

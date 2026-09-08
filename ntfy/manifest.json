@@ -1,11 +1,11 @@
 {
   "id": "ntfy",
   "name": "ntfy",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "hostApi": "1",
   "entry": { "engine": "engine.js", "renderer": "renderer.js" },
   "enabledByDefault": false,
-  "announce": "Subscribes to an ntfy topic (e.g. GitHub webhooks rendered by ntfy) and raises each message as an operator inbox note and, optionally, a rate-limited one-line summary to one seat. Message text arrives fenced as untrusted; tag and title filters drop what you do not want to hear about.",
+  "announce": "Subscribes to an ntfy topic (e.g. GitHub webhooks rendered by ntfy) and raises each message as an operator inbox note and, optionally, a rate-limited one-line summary to one seat. Message text arrives fenced as untrusted; tag, title and author filters drop what you do not want to hear about — including an agent's own comments, without losing the opens and closes.",
   "surfaces": {
     "settings.get": "any",
     "status.get": "any"

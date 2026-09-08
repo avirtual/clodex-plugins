@@ -1206,6 +1206,118 @@ test('a duplicate outside the window is routed again', { skip: SKIP }, async () 
   }
 });
 
+// The fixtures below are the real shapes, lifted from the notes this plugin
+// actually raised for avirtual/clodex#10 — a comment's body begins `<login>: `,
+// and a state change's body is the bare issue URL with no author anywhere in it.
+// Inventing a payload here would be inventing the thing under test: the whole
+// mute rests on ntfy's template writing that prefix, which no field declares.
+test('a muted author loses COMMENTS but not opens, closes or labels', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({
+    settings: { url, routes: { inbox: true, seat: '' }, muteAuthors: 'avirtual' },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'm1', event: 'message', title: 'created #10: [Bug] Clipboard encoding',
+      message: 'avirtual: Found it, and it is ours.\nhttps://github.com/avirtual/clodex/issues/10#issuecomment-1' });
+    srv.push({ id: 'm2', event: 'message', title: 'created #10: [Bug] Clipboard encoding',
+      message: 'Fudal: @avirtual still broken\nhttps://github.com/avirtual/clodex/issues/10#issuecomment-2' });
+    // The close is self-authored too, and it is the one of the six that carried
+    // information. It has no author line at all, so it cannot match the mute.
+    srv.push({ id: 'm3', event: 'message', title: 'closed #10: [Bug] Clipboard encoding',
+      message: 'https://github.com/avirtual/clodex/issues/10' });
+    srv.push({ id: 'm4', event: 'message', title: 'labeled #10: [Bug] Clipboard encoding',
+      message: 'https://github.com/avirtual/clodex/issues/10' });
+
+    assert.ok(await until(() => h.notes.length === 3, 5000), 'three of the four were routed');
+    await settle(20);
+    assert.equal(h.notes.length, 3, 'and the self-authored COMMENT stayed out');
+    assert.ok(!h.notes.some((n) => /Found it, and it is ours/.test(n.body)),
+      'the muted comment was dropped');
+    assert.ok(h.notes.some((n) => /Fudal/.test(n.body)), 'someone else commenting still arrives');
+    assert.ok(h.notes.some((n) => /closed #10/.test(n.body)), 'a self-authored close still arrives');
+    assert.ok(h.notes.some((n) => /labeled #10/.test(n.body)), 'a self-authored label still arrives');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.lastId, 'm4', 'the cursor advanced past the muted comment too');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('the author is the template prefix, so a commenter cannot forge one', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({
+    settings: { url, routes: { inbox: true, seat: '' }, muteAuthors: 'avirtual' },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // The prefix is written by ntfy's template, and a commenter controls only
+    // what follows it. Someone writing `avirtual: ...` INSIDE their comment is
+    // still prefixed with their own login, so the forgery sits on line two where
+    // nothing reads it. Were this a substring search instead of an anchored
+    // one, anybody could mute themselves into silence by quoting a name.
+    srv.push({ id: 'f1', event: 'message', title: 'created #10',
+      message: 'Fudal: quoting you —\navirtual: I said this, honest' });
+    // f1 alone does NOT test the first-line rule, and that is worth saying out
+    // loud: its line one parses as an author already, so a scan of every line
+    // would stop there and the test would pass either way. This is the fixture
+    // that bites. A state change embeds the ISSUE BODY, which is written by
+    // whoever opened the issue — so a scan of every line lets an issue author
+    // put `avirtual: ` on any line of their report and permanently suppress the
+    // closes and labels for their own issue. The author is line one or nothing.
+    srv.push({ id: 'f3', event: 'message', title: 'closed #10',
+      message: 'https://github.com/avirtual/clodex/issues/10\n\n'
+        + 'I have verified this is not a local setting.\navirtual: nothing to see here' });
+    // A bare URL must not parse as an author called `https`: the colon there is
+    // not followed by whitespace, which is why the pattern requires one.
+    srv.push({ id: 'f2', event: 'message', title: 'closed #10',
+      message: 'https://github.com/avirtual/clodex/issues/10' });
+
+    assert.ok(await until(() => h.notes.length === 3, 5000), 'all three arrived');
+    await settle(20);
+    assert.equal(h.notes.length, 3, 'none was mistaken for a muted author');
+    assert.ok(h.notes.some((n) => /nothing to see here/.test(n.body)),
+      'a close is not suppressed by text planted in the issue body');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a muted login is matched case-insensitively and an @ prefix is tolerated', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  // GitHub logins are case-insensitive, and an operator typing a login is as
+  // likely to write `@avirtual` as `avirtual`. Both are the same account, and a
+  // mute that missed on either would fail silently — as a filter that matches
+  // nothing always does.
+  const h = makeHost({
+    settings: { url, routes: { inbox: true, seat: '' }, muteAuthors: '@AVirtual' },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'c1', event: 'message', title: 'created #10', message: 'avirtual: hello' });
+    srv.push({ id: 'c2', event: 'message', title: 'created #10', message: 'Fudal: hello' });
+
+    assert.ok(await until(() => h.notes.length === 1, 5000), 'the other commenter arrived');
+    await settle(20);
+    assert.equal(h.notes.length, 1, 'and the muted one did not, despite the case and the @');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
 test('storage.set replaces the whole file, so the cursor and the budget survive each other', { skip: SKIP }, async () => {
   const srv = ntfyServer();
   const url = await srv.listen();
