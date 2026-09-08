@@ -132,6 +132,11 @@ const HELD_NOTICE_MS = envMs('CLODEX_NTFY_HELD_NOTICE_MS', 60 * 1000);
 // the list it parses into needs a bound like every other read here.
 const LIST_MAX = 32;
 
+// Topics subscribed to at once. A bound rather than a taste: they are joined
+// into one request path, and an unbounded list would build a URL no server
+// accepts — which fails as a 414 with the whole plugin idle, not as one bad row.
+const TOPICS_MAX = 32;
+
 const TOPIC_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const SEAT_RE = /^(?!\.+$)[a-zA-Z0-9._-]{1,64}$/;
 
@@ -177,7 +182,13 @@ let headerTimeouts = 0;
 let polling = false;   // a poll request is in flight; keeps them from overlapping
 // The pending held-back notice, if one is armed. Only ever one: a second timer
 // would send a second notice for the same hour.
-let heldTimer = null;
+let heldTimers = new Map();
+
+// Topics refused by readTopics, so each is logged once rather than every five
+// seconds: readSettings() runs on the reconcile poll, and a per-read log line
+// would turn one typo into a permanent stream of identical errors.
+let badTopics = new Set();
+let badTopicsLogged = new Set();
 
 function logInfo(msg) {
   try { if (host) host.log.info(msg); } catch (_) {}
@@ -206,11 +217,12 @@ function clearTimers() {
     try { clearTimeout(t); } catch (_) {}
   }
   timers.clear();
-  // The held-notice timer lives in the same set, so it has just been cancelled.
-  // Forgetting to drop the handle would leave armHeldNotice() believing a notice
-  // is still pending and refusing to arm another for the life of the plugin —
-  // a reconnect (which calls this) would silence the notice permanently.
-  heldTimer = null;
+  // The held-notice timers live in the same set, so they have just been
+  // cancelled. Forgetting to drop the handles would leave armHeldNotice()
+  // believing a notice is still pending and refusing to arm another for the
+  // life of the plugin — a reconnect (which calls this) would silence the
+  // notice permanently.
+  heldTimers.clear();
 }
 
 function parseTopicUrl(raw) {
@@ -224,6 +236,23 @@ function parseTopicUrl(raw) {
   const topic = segs[segs.length - 1];
   if (!TOPIC_RE.test(topic)) return null;
   return { href: `${u.origin}${u.pathname}`.replace(/\/+$/, ''), topic, secure: u.protocol === 'https:' };
+}
+
+/*
+ * The SERVER, without a topic on the end: everything a request is built from
+ * except which topics it names.
+ *
+ * Separate from parseTopicUrl because a topic is no longer part of the address —
+ * one server now carries several, and the topic that a message belongs to comes
+ * from the message itself.
+ */
+function parseServer(raw) {
+  const s = String(raw == null ? '' : raw).trim();
+  if (!s) return null;
+  let u;
+  try { u = new URL(s); } catch (_) { return null; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
+  return { href: `${u.origin}${u.pathname}`.replace(/\/+$/, ''), secure: u.protocol === 'https:' };
 }
 
 /*
@@ -246,16 +275,78 @@ function readList(raw) {
     .slice(0, LIST_MAX);
 }
 
+/*
+ * The topic table: one row per topic, each with its own optional seat.
+ *
+ * A row whose topic is unusable is SKIPPED, not fatal, and says so once. One
+ * mistyped row must not idle the whole plugin — the other topics are still
+ * deliverable, and a plugin that goes silent because of a typo in row four
+ * looks exactly like a plugin that is broken.
+ *
+ * A seat that fails SEAT_RE is emptied rather than dropping the row: the topic
+ * is still worth an inbox note, and silently routing it to a NEIGHBOURING seat
+ * would be worse than routing it nowhere.
+ */
+function readTopics(raw, legacy) {
+  const rows = [];
+  const seen = new Set();
+  const list = Array.isArray(raw) ? raw : [];
+  for (const r of list) {
+    if (rows.length >= TOPICS_MAX) break;
+    const row = (r && typeof r === 'object' && !Array.isArray(r)) ? r : {};
+    const topic = String(row.topic == null ? '' : row.topic).trim();
+    if (!TOPIC_RE.test(topic)) {
+      if (topic) badTopics.add(topic);
+      continue;
+    }
+    // The same topic twice would double every message on it: one connection
+    // delivers it once, but two rows would each route it.
+    if (seen.has(topic)) continue;
+    seen.add(topic);
+    const seat = String(row.seat == null ? '' : row.seat).trim();
+    rows.push({ topic, seat: SEAT_RE.test(seat) ? seat : '' });
+  }
+
+  // MIGRATION. A 1.5.0 config has `url` (topic on the end) and `routes.seat`,
+  // and nothing has written `topics` yet. Reading it as one row keeps that
+  // operator connected across the upgrade instead of silently going idle with
+  // their settings still on screen — they never asked for a table.
+  if (!rows.length && legacy && legacy.topic) {
+    rows.push({ topic: legacy.topic, seat: legacy.seat || '' });
+  }
+  return rows;
+}
+
 function readSettings() {
   let s = {};
   try { s = host.settings.get() || {}; } catch (_) { s = {}; }
   const routes = (s.routes && typeof s.routes === 'object' && !Array.isArray(s.routes)) ? s.routes : {};
   const seat = typeof routes.seat === 'string' ? routes.seat.trim() : DEFAULTS.routes.seat;
+  const url = typeof s.url === 'string' ? s.url.trim() : DEFAULTS.url;
+  const legacyTarget = parseTopicUrl(url);
+  const cleanSeat = SEAT_RE.test(seat) ? seat : '';
   return {
-    url: typeof s.url === 'string' ? s.url.trim() : DEFAULTS.url,
+    url,
+    /*
+     * The server is `server` when set, and otherwise the legacy url with its
+     * topic segment stripped — so one field moves an upgrading operator over
+     * without them touching the dialog.
+     *
+     * The fallback is the RAW url, not the parsed one, when parsing fails. An
+     * unusable url must stay visible as an unusable SERVER: derived from the
+     * parse, every malformed url would come back as the empty string and report
+     * "no server configured", which tells an operator who typed something wrong
+     * that they typed nothing at all — and sends them to the wrong fix.
+     */
+    server: (typeof s.server === 'string' && s.server.trim())
+      ? s.server.trim()
+      : (legacyTarget ? legacyTarget.href.replace(/\/[^/]+$/, '') : url),
+    topics: readTopics(s.topics, legacyTarget
+      ? { topic: legacyTarget.topic, seat: cleanSeat }
+      : null),
     routes: {
       inbox: routes.inbox === undefined ? DEFAULTS.routes.inbox : !!routes.inbox,
-      seat: SEAT_RE.test(seat) ? seat : '',
+      seat: cleanSeat,
     },
     allowFrom: readList(s.allowFrom),
     // Lowercased once, here, so the case-insensitive match downstream is a
@@ -270,18 +361,84 @@ function readSettings() {
 
 const nums = (v, max) => (Array.isArray(v) ? v.filter((x) => Number.isFinite(x)).slice(-max) : []);
 
+// A `{ seat: number }` map, migrating a bare number onto the seat that earned
+// it — the 1.5.0 shape, where there was only ever one seat.
+function numMap(v, legacySeat) {
+  if (Number.isFinite(v)) return { [legacySeat]: v };
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+  return Object.fromEntries(Object.entries(v)
+    .filter(([k, n]) => SEAT_RE.test(k) && Number.isFinite(n)));
+}
+
 function readStorage() {
   let s = {};
   try { s = host.storage.get() || {}; } catch (_) { s = {}; }
   const seen = Array.isArray(s.seen) ? s.seen.filter((x) => typeof x === 'string') : [];
+  /*
+   * Which seat a 1.5.0 budget belonged to, for the migrations below.
+   *
+   * Recorded in STORAGE at the time it was spent, rather than read from
+   * settings now: settings are mutable and the operator may well be changing
+   * the seat in the same breath as upgrading, and attributing an old budget to
+   * a newly-typed seat would hand the flooding seat a clean allowance while
+   * charging its spend to an innocent one. Absent, the budget belongs to no
+   * live seat and simply ages out of its window — which is correct, since the
+   * seat it was spent by is no longer being written to.
+   */
+  const legacySeat = (typeof s.budgetSeat === 'string' && SEAT_RE.test(s.budgetSeat))
+    ? s.budgetSeat
+    : 'legacy seat';
   return {
     lastId: (typeof s.lastId === 'string' && s.lastId) ? s.lastId : null,
+    /*
+     * The cursor, PER TOPIC — `{ <topic>: <last id handled> }`.
+     *
+     * A single shared cursor loses messages, and this is measured against
+     * ntfy.sh rather than inferred. `since=<id>` on a comma-joined path does
+     * not mean "resume after that message": ntfy resolves the id to its
+     * TIMESTAMP and filters every topic by time. Publish A1,B1,A2,B2 across two
+     * topics and ask for `since=<id of A2>`, and B1 never arrives — it is older
+     * in time than the cursor, though it was never delivered.
+     *
+     * Worse, ntfy timestamps have SECOND granularity, so two messages published
+     * in the same second on different topics collapse: a cursor on one drops
+     * the other permanently, with no error and no gap to notice. On a topic fed
+     * by GitHub — where a push and its CI result land in the same second
+     * routinely — that is silent, unrecoverable loss.
+     *
+     * A per-topic cursor cannot express that bug: each topic's resume is asked
+     * for on its own, against its own last id.
+     */
+    cursors: (s.cursors && typeof s.cursors === 'object' && !Array.isArray(s.cursors))
+      ? Object.fromEntries(Object.entries(s.cursors)
+        .filter(([k, v]) => TOPIC_RE.test(k) && v && typeof v === 'object'
+          && typeof v.id === 'string' && v.id && Number.isFinite(v.at))
+        .map(([k, v]) => [k, { id: v.id, at: v.at }])
+        .slice(0, TOPICS_MAX))
+      : {},
     seen,
     // Injection timestamps, newest last. Persisted rather than kept in memory
     // because a budget that resets on restart is not a budget: a plugin that
     // reconnects on a backoff would refill its allowance every time the stream
     // dropped, which under a flood is precisely when it drops.
-    injections: nums(s.injections, HOUR_MAX * 4),
+    /*
+     * The budget, PER SEAT — `{ <seat>: [timestamps] }`.
+     *
+     * Per seat rather than global because the budget exists to protect a
+     * context window, and each seat has its own. Shared, one noisy topic would
+     * spend the whole allowance and starve every other seat — the quiet topic
+     * that only fires on a release would find the budget gone, which is exactly
+     * when its one message matters most.
+     *
+     * The 1.5.0 shape was a bare array. It is migrated onto the seat it was
+     * actually spent by (there was only one), so an upgrade does not hand a
+     * flooding seat a fresh allowance.
+     */
+    injections: (Array.isArray(s.injections) || !s.injections || typeof s.injections !== 'object')
+      ? { [legacySeat]: nums(s.injections, HOUR_MAX * 4) }
+      : Object.fromEntries(Object.entries(s.injections)
+        .filter(([k]) => SEAT_RE.test(k))
+        .map(([k, v]) => [k, nums(v, HOUR_MAX * 4)])),
     // The last RECENT_MAX routed messages as { h: digest, at: ms }, for
     // duplicate collapse. Digests, not bodies — this file is on disk, the
     // bodies are attacker-supplied, and nothing here needs to read them back.
@@ -289,9 +446,11 @@ function readStorage() {
       ? s.recent.filter((r) => r && typeof r.h === 'string' && Number.isFinite(r.at)).slice(-RECENT_MAX)
       : [],
     // When the "N held back" line was last sent, and how many have been held
-    // since. Both persisted for the same reason as `injections`.
-    heldAt: Number.isFinite(s.heldAt) ? s.heldAt : 0,
-    held: Number.isFinite(s.held) ? s.held : 0,
+    // since — both per seat, for the same reason the budget is: the notice
+    // reports one seat's held count, and a shared counter would tell a seat
+    // about messages that were held from somebody else.
+    heldAt: numMap(s.heldAt, legacySeat),
+    held: numMap(s.held, legacySeat),
     // When the allowFrom drop count was last logged, and its running total.
     droppedAt: Number.isFinite(s.droppedAt) ? s.droppedAt : 0,
     dropped: Number.isFinite(s.dropped) ? s.dropped : 0,
@@ -311,12 +470,18 @@ function saveStorage(patch) {
   catch (e) { logError(`could not persist state: ${errText(e)}`); }
 }
 
-function remember(id) {
+function remember(id, topic) {
   const st = readStorage();
   const seen = st.seen.filter((x) => x !== id);
   seen.push(id);
   while (seen.length > SEEN_MAX) seen.shift();
-  saveStorage({ lastId: id, seen });
+  // The cursor advances for the topic the message BELONGS TO, read off the
+  // event — never for the whole subscription. `lastId` is kept alongside for
+  // status.get and for a downgrade to 1.5.0, which would otherwise resume from
+  // nothing at all.
+  const cursors = { ...st.cursors };
+  if (topic && TOPIC_RE.test(topic)) cursors[topic] = { id, at: Date.now() };
+  saveStorage({ lastId: id, seen, cursors });
 }
 
 function neuter(text) {
@@ -480,15 +645,15 @@ function dropReason(ev, cfg, now) {
  * since the last time the operator was told about it, which is what the
  * held-back line reports.
  */
-function seatBudget(now) {
+function seatBudget(seat, now) {
   const st = readStorage();
-  const inj = st.injections.filter((t) => (now - t) < HOUR_WINDOW_MS);
+  const inj = (st.injections[seat] || []).filter((t) => (now - t) < HOUR_WINDOW_MS);
   const burst = inj.filter((t) => (now - t) < BURST_WINDOW_MS);
   return {
     allowed: burst.length < BURST_MAX && inj.length < HOUR_MAX,
     injections: inj,
-    held: st.held,
-    heldAt: st.heldAt,
+    held: st.held[seat] || 0,
+    heldAt: st.heldAt[seat] || 0,
   };
 }
 
@@ -510,22 +675,35 @@ function injectSeat(seat, text) {
  * allowance on the message that says the allowance is spent.
  */
 function armHeldNotice(seat, topic, now, heldAt) {
-  if (heldTimer) return;                                 // a burst arms one timer
+  // Per SEAT, not one handle for the plugin. A single timer would mean the
+  // first flooding seat silences every other seat's notice for as long as its
+  // own is pending — so a quiet seat starved by a noisy topic would never be
+  // told why it went quiet, which is the one thing the notice exists to say.
+  if (heldTimers.has(seat)) return;                      // a burst arms one timer
   if ((now - heldAt) < HOUR_WINDOW_MS) return;           // already told this hour
-  heldTimer = schedule(() => {
-    heldTimer = null;
+  heldTimers.set(seat, schedule(() => {
+    heldTimers.delete(seat);
     if (stopped) return;
     const st = readStorage();
-    if (!st.held) return;
-    const line = `[ntfy] ${topic}: ${st.held} message${st.held === 1 ? '' : 's'} `
+    const n = st.held[seat] || 0;
+    if (!n) return;
+    const line = `[ntfy] ${topic}: ${n} message${n === 1 ? '' : 's'} `
       + 'held back this hour; see the inbox';
-    if (injectSeat(seat, line)) saveStorage({ held: 0, heldAt: Date.now() });
-  }, HELD_NOTICE_MS);
+    if (injectSeat(seat, line)) {
+      saveStorage({
+        held: { ...readStorage().held, [seat]: 0 },
+        heldAt: { ...readStorage().heldAt, [seat]: Date.now() },
+      });
+    }
+  }, HELD_NOTICE_MS));
 }
 
-function route(ev, topic) {
+function route(ev, row) {
   const cfg = readSettings();
   const now = Date.now();
+  const topic = row.topic;
+  // The seat comes from the ROW — the topic's own — not from the global route.
+  const seat = row.seat;
 
   // The inbox runs FIRST, and not only because it is unbudgeted: its return
   // value carries the note id that the seat summary points at.
@@ -537,7 +715,7 @@ function route(ev, topic) {
     else logError(`inbox note refused: ${(r && r.error) || 'unknown'}`);
   }
 
-  if (!cfg.routes.seat) return;
+  if (!seat) return;
 
   // Oversized messages are inbox-only regardless of budget: spending an
   // injection on one is worse than spending the budget on ten normal ones.
@@ -546,25 +724,28 @@ function route(ev, topic) {
     return;
   }
 
-  const budget = seatBudget(now);
+  const budget = seatBudget(seat, now);
   if (!budget.allowed) {
     // Every held message is logged, so the plugin log is a complete record even
     // though the seat is deliberately told once.
-    logInfo(`seat budget spent — message ${ev.id} is in the inbox but was not injected`);
-    saveStorage({ held: budget.held + 1 });
-    armHeldNotice(cfg.routes.seat, topic, now, budget.heldAt);
+    logInfo(`seat ${seat} budget spent — message ${ev.id} is in the inbox but was not injected`);
+    saveStorage({ held: { ...readStorage().held, [seat]: budget.held + 1 } });
+    armHeldNotice(seat, topic, now, budget.heldAt);
     return;
   }
 
-  if (!injectSeat(cfg.routes.seat, seatText(ev, topic, noteId))) return;
-  // Counted only on a DELIVERED injection. A message the seat never got has not
-  // cost it any context, so charging the budget for it would let a dead seat
-  // exhaust the allowance of the live one that replaces it.
-  const injections = budget.injections.concat(now).slice(-(HOUR_MAX * 4));
+  if (!injectSeat(seat, seatText(ev, topic, noteId))) return;
+  // Counted only on a DELIVERED injection, and against THIS seat. A message the
+  // seat never got has not cost it any context, so charging the budget for it
+  // would let a dead seat exhaust the allowance of the live one that replaces it.
+  const injections = {
+    ...readStorage().injections,
+    [seat]: budget.injections.concat(now).slice(-(HOUR_MAX * 4)),
+  };
   saveStorage({ injections });
 }
 
-function handleLine(line, topic) {
+function handleLine(line) {
   const s = line.trim();
   if (!s) return;
   let ev;
@@ -576,16 +757,36 @@ function handleLine(line, topic) {
   if (!id) return;
   if (readStorage().seen.includes(id)) return;
 
+  /*
+   * The topic comes from the EVENT, not from the request.
+   *
+   * One connection now carries several topics, so the request path names all of
+   * them and says nothing about which one a given message belongs to — only the
+   * event does. Taking it from the URL, as this did when a connection meant one
+   * topic, would label every message with the whole comma-joined list and route
+   * them all to whichever seat happened to be first.
+   *
+   * A message for a topic no row asked for is dropped rather than routed
+   * somewhere arbitrary: it can arrive legitimately, in the window between the
+   * operator removing a row and the reconnect that stops asking for it.
+   */
+  const topic = typeof ev.topic === 'string' ? ev.topic : '';
+  const cfg = readSettings();
+  const row = cfg.topics.find((t) => t.topic === topic);
+  if (!row) {
+    remember(id, topic);
+    return;
+  }
+
   // The cursor moves for every message SEEN, before any filter runs and whatever
   // any of them decide. A cursor that only advanced past routed messages would
   // re-fetch every filtered one on the next reconnect — so a topic filtered down
   // to nothing would replay its whole backlog forever, and the filters would
   // cost more work the better they worked.
-  remember(id);
+  remember(id, topic);
   lastEventAt = Date.now();
 
   const now = Date.now();
-  const cfg = readSettings();
   const why = dropReason(ev, cfg, now);
   if (why) {
     if (why === 'allowFrom') countAllowFromDrop(now);
@@ -601,7 +802,7 @@ function handleLine(line, topic) {
   const recent = st.recent.concat({ h: digest(ev), at: now }).slice(-RECENT_MAX);
   saveStorage({ recent });
 
-  route(ev, topic);
+  route(ev, row);
 }
 
 // allowFrom drops are counted and reported at most once an hour. Silence would
@@ -636,6 +837,84 @@ function endStream(err) {
   scheduleReconnect();
 }
 
+/*
+ * The subscribe URL for the whole topic list: one request, comma-joined.
+ *
+ * ONE connection for every topic, but the `since` is the awkward part. ntfy
+ * takes a single `since` for the whole request and applies it BY TIMESTAMP
+ * across every topic named (see `cursors` in readStorage for the measurement),
+ * so the only value that cannot skip an undelivered message is the OLDEST
+ * cursor in the set: anything newer silently drops whatever arrived earlier on
+ * a quieter topic.
+ *
+ * Re-delivery is the price, and it is one this plugin can already pay — the
+ * `seen` list makes handleLine idempotent, so a message that arrives twice is
+ * dropped the second time. Skipping is unrecoverable; repeating is not, and
+ * that asymmetry is the whole of the choice.
+ *
+ * `latest` when no topic has a cursor yet: the alternative, `all`, replays a
+ * topic's entire retained history into an operator's inbox the first time they
+ * add it, which for a busy repo is hundreds of notes about things that already
+ * happened.
+ */
+/*
+ * Why the plugin is idle, or null if it is not.
+ *
+ * A missing server and an empty topic list are DIFFERENT answers, and both are
+ * different from an unusable server: "no topics" tells an operator to add a
+ * row, "server not valid" tells them to fix what they typed. One shared message
+ * would send half of them to the wrong field.
+ */
+function idleFor(cfg, target) {
+  if (!cfg.server) return 'no ntfy server configured; idle';
+  if (!target) return 'server url not valid; idle';
+  if (!cfg.topics.length) return 'no topics configured; idle';
+  return null;
+}
+
+/*
+ * Everything the CONNECTION depends on, as one string for reconcile to compare.
+ *
+ * The seat is in it as well as the topic: a message is routed by the row it
+ * matched, read fresh per message, so a seat change does not strictly need a
+ * reconnect — but leaving it out means an operator who fixes a mistyped seat
+ * sees nothing happen and no log line, which is indistinguishable from the save
+ * having failed.
+ */
+function configSignature(cfg) {
+  return JSON.stringify([cfg.server, cfg.topics.map((t) => [t.topic, t.seat])]);
+}
+
+// Each unusable topic row is logged ONCE. readSettings runs on the reconcile
+// poll, so a line per read would turn one typo into a permanent error stream —
+// but saying nothing at all leaves a row that silently never delivers, which is
+// the failure mode that looks like a broken plugin.
+function reportBadTopics() {
+  for (const t of badTopics) {
+    if (badTopicsLogged.has(t)) continue;
+    badTopicsLogged.add(t);
+    logError(`topic ${JSON.stringify(t)} is not a valid ntfy topic name — that row is skipped`);
+  }
+}
+
+function subscribeUrl(server, topics, poll) {
+  const names = topics.map((t) => t.topic);
+  const cursors = readStorage().cursors;
+  // A topic with NO cursor has never delivered anything, so there is nothing to
+  // resume after. One such topic forces `latest` for the whole request: any id
+  // would be an arbitrary point in a history this plugin has never seen, and
+  // choosing one would either replay a stranger's backlog or skip past it.
+  const rows = names.map((n) => cursors[n]);
+  const since = rows.every(Boolean) && rows.length
+    // ntfy ids are random rather than monotonic, so "oldest" cannot be read off
+    // the id — it comes from `at`, the moment this plugin handled it.
+    ? rows.reduce((a, b) => (a.at <= b.at ? a : b)).id
+    : 'latest';
+  const path = names.map((n) => encodeURIComponent(n)).join(',');
+  const q = poll ? 'poll=1&' : '';
+  return `${server.href}/${path}/json?${q}since=${encodeURIComponent(since)}`;
+}
+
 function connect() {
   if (stopped || req) return;
 
@@ -643,15 +922,16 @@ function connect() {
   // Recorded BEFORE the validity check, and for the invalid case too: this is
   // "what the engine has configured itself from", not "what it is connected to".
   // An unusable url the operator has not changed is still the url in force.
-  configuredUrl = cfg.url;
+  configuredUrl = configSignature(cfg);
 
-  const target = parseTopicUrl(cfg.url);
-  if (!target) {
+  const target = parseServer(cfg.server);
+  const why = idleFor(cfg, target);
+  if (why) {
     // Validation lives HERE, on read, not on the way in: the settings dialog
     // hands its patch to the host, which persists whatever it is given, so an
     // unusable url can reach storage by a route this plugin does not sit on.
     // Refusing it at the point of use is the check that cannot be bypassed.
-    idleReason = cfg.url ? 'url not valid; idle' : 'no topic url configured; idle';
+    idleReason = why;
     if (!idleLogged) {
       idleLogged = true;
       logInfo(idleReason);
@@ -659,9 +939,9 @@ function connect() {
     return;
   }
   idleReason = null;
+  reportBadTopics();
 
-  const since = readStorage().lastId || 'latest';
-  const url = `${target.href}/json?since=${encodeURIComponent(since)}`;
+  const url = subscribeUrl(target, cfg.topics, false);
   const headers = { Accept: 'application/x-ndjson' };
   const token = process.env[TOKEN_ENV];
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -699,7 +979,7 @@ function connect() {
         while (nl !== -1) {
           const line = buf.slice(0, nl);
           buf = buf.slice(nl + 1);
-          try { handleLine(line, target.topic); } catch (e) { logError(`message handling failed: ${errText(e)}`); }
+          try { handleLine(line); } catch (e) { logError(`message handling failed: ${errText(e)}`); }
           nl = buf.indexOf('\n');
         }
         // Only reachable with no newline in the whole buffer, so nothing here is
@@ -780,16 +1060,16 @@ function pollOnce() {
   // comparison self-satisfying — always equal, never a change, and a url saved
   // while polling never picked up. connect() is the one writer.
   const cfg = readSettings();
-  const target = parseTopicUrl(cfg.url);
-  if (!target) {
-    idleReason = cfg.url ? 'url not valid; idle' : 'no topic url configured; idle';
+  const target = parseServer(cfg.server);
+  const why = idleFor(cfg, target);
+  if (why) {
+    idleReason = why;
     schedulePoll();
     return;
   }
   idleReason = null;
 
-  const since = readStorage().lastId || 'latest';
-  const url = `${target.href}/json?poll=1&since=${encodeURIComponent(since)}`;
+  const url = subscribeUrl(target, cfg.topics, true);
   const headers = { Accept: 'application/x-ndjson' };
   const token = process.env[TOKEN_ENV];
   if (token) headers.Authorization = `Bearer ${token}`;
@@ -830,7 +1110,7 @@ function pollOnce() {
       res.on('end', () => {
         if (over) return;
         for (const line of body.split('\n')) {
-          try { handleLine(line, target.topic); } catch (e) { logError(`message handling failed: ${errText(e)}`); }
+          try { handleLine(line); } catch (e) { logError(`message handling failed: ${errText(e)}`); }
         }
         done(null);
       });
@@ -890,9 +1170,12 @@ function restart() {
  */
 function reconcile() {
   if (stopped) return;
-  const saved = readSettings().url;
+  // The whole subscription, not just the url: adding a topic or moving one to
+  // a different seat has to reconnect too, and a check on the url alone would
+  // leave a newly-added topic unsubscribed until something else changed.
+  const saved = configSignature(readSettings());
   if (saved !== (configuredUrl == null ? '' : configuredUrl)) {
-    logInfo('topic url changed in settings; reconnecting');
+    logInfo('subscription changed in settings; reconnecting');
     idleLogged = false;
     restart();
     return;
@@ -934,6 +1217,9 @@ module.exports.activate = (h) => {
   mode = 'stream';
   headerTimeouts = 0;
   polling = false;
+  heldTimers = new Map();
+  badTopics = new Set();
+  badTopicsLogged = new Set();
 
   // The plugin raises operator inbox notes, which is its whole point, so a host
   // without that surface cannot run it. Named rather than versioned: the
@@ -948,12 +1234,25 @@ module.exports.activate = (h) => {
     connected,
     lastId: readStorage().lastId,
     lastEventAt,
-    // How much of the seat's allowance is left. Surfaced because a seat that
-    // has stopped being injected while the inbox keeps filling is otherwise
-    // indistinguishable from a broken seat name, and this is the dialog an
-    // operator would check.
-    seatBudgetLeft: Math.max(0, BURST_MAX - seatBudget(Date.now()).injections
-      .filter((t) => (Date.now() - t) < BURST_WINDOW_MS).length),
+    // How much of each seat's allowance is left, per seat. Surfaced because a
+    // seat that has stopped being injected while the inbox keeps filling is
+    // otherwise indistinguishable from a broken seat name, and this is the
+    // dialog an operator would check. Per seat now that each has its own
+    // budget: a single number could only describe one of them.
+    seatBudgetLeft: Object.fromEntries(
+      readSettings().topics.filter((t) => t.seat).map((t) => [t.seat,
+        Math.max(0, BURST_MAX - seatBudget(t.seat, Date.now()).injections
+          .filter((x) => (Date.now() - x) < BURST_WINDOW_MS).length)]),
+    ),
+    // The subscription as the engine currently reads it, so the dialog can show
+    // which topics are live rather than only what was typed into it.
+    topics: readSettings().topics,
+    // The per-topic cursors, flattened to `{ topic: id }`. Surfaced because
+    // "which topic is stuck" is otherwise unanswerable from outside — one
+    // shared lastId could never have shown it.
+    cursors: Object.fromEntries(
+      Object.entries(readStorage().cursors).map(([k, v]) => [k, v.id]),
+    ),
     // Two different "not connected"s, kept apart: `idle` is a configuration
     // answer and stays until the settings change, `error` is the last network
     // failure and is cleared by a successful connect.

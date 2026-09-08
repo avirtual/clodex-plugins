@@ -79,3 +79,50 @@
   font-size: 11px;
   color: var(--text-dim);
 }
+
+/* The topic table. Sits in the field column of its row, like every input. */
+.ntfy-topics {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* topic | seat | remove. The remove button is sized to its glyph so the two
+   text columns get everything else — a three-equal-column grid would waste a
+   third of the width on a ×. */
+.ntfy-topic-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.ntfy-topic-add,
+.ntfy-topic-del {
+  grid-column: 2;
+  justify-self: start;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.ntfy-topic-add { margin-top: 6px; }
+
+/* The delete button is in its row's third column, not the panel's second. */
+.ntfy-topic-del {
+  grid-column: auto;
+  padding: 2px 7px;
+  line-height: 1.2;
+}
+
+.ntfy-topic-add:hover,
+.ntfy-topic-del:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}

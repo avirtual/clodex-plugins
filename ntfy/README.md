@@ -1,7 +1,8 @@
 # ntfy
 
-Subscribes to an [ntfy](https://ntfy.sh) topic and turns every message into an
-operator inbox note and, optionally, a DM to one seat.
+Subscribes to one or more [ntfy](https://ntfy.sh) topics and turns every message
+into an operator inbox note and, optionally, a DM to a seat — a different seat
+per topic, if you want one.
 
 The motivating case: point a GitHub webhook at an ntfy topic with
 `?template=github`, and pushes, PRs and CI results land in Clodex without
@@ -18,9 +19,9 @@ Settings ▸ Plugins ▸ ntfy.
 
 | Field | Meaning |
 |---|---|
-| Topic URL | The full topic URL, e.g. `https://ntfy.example.com/clodex`. Empty means idle — no request is made. |
+| Server | The ntfy server, **without** a topic — e.g. `https://ntfy.example.com`. Empty means idle; no request is made. |
 | Inbox note | Raise each message in the operator inbox. |
-| Also DM seat | A session name to inject a one-line summary into. Empty for none; a dead or unknown seat is logged and skipped. |
+| Topics | One row per topic, each with an optional seat. Empty seat = inbox note only. A dead or unknown seat is logged and skipped; a row whose topic is not a valid ntfy name is skipped with one log line, and the other rows still deliver. |
 | Only from | Comma-separated tag or title **prefixes**, e.g. `github`. Empty accepts everything. |
 | Ignore titles containing | Comma-separated, case-insensitive substrings, e.g. `labeled, unlabeled`. |
 | Mute comments by | Comma-separated GitHub logins, e.g. `avirtual`. Their **comments** are dropped; opens, closes and labels still arrive. Empty by default — nothing in a message identifies your account, so this cannot be inferred. The author is read from the `<login>: ` prefix on the body's **first line**, which ntfy's template writes; there is no author field to match on. See [Filtering](#filtering). |
@@ -36,8 +37,15 @@ window. The token is never written to a log line either.
 
 Saving takes effect within about five seconds; there is no restart to do. The
 status line under the fields says what the engine currently thinks, which is the
-thing to read if a saved URL does not seem to have taken: `url not valid; idle`
-means it was stored and refused, not that the save was lost.
+thing to read if a saved server does not seem to have taken: `server url not
+valid; idle` means it was stored and refused, not that the save was lost. It
+also names the topics the engine actually settled on, which is how a skipped row
+becomes visible.
+
+**Upgrading from 1.5.0 needs no action.** A config with the old single `url`
+(topic on the end) and `Also DM seat` is read as one topic row on the server that
+url pointed at, so an existing install keeps delivering to the same seat without
+the dialog being opened. Saving from the new dialog writes the table.
 
 ### How settings are saved, and why it is worth writing down
 
@@ -54,13 +62,18 @@ inside its own `settings.set` therefore never reconnects at all once that method
 stops being the route settings arrive by. So the engine **polls** — it compares
 the saved URL against the one the live connection was built from, every five
 seconds, and reconnects when they differ. That poll is the entire mechanism by
-which saving a URL does anything.
+which saving anything here does anything. What it compares is the whole
+subscription — server, topics and seats — because adding a topic has to
+reconnect too, and a check on the server alone would leave a newly-added topic
+unsubscribed until something else happened to change.
 
 Validation lives on the **read**, in `connect()`, not on the write. It has to:
 `_host`'s own `settings.set` answers on both surfaces and can write any plugin's
 settings key ([plugin-api.md §2.2]), so a renderer-side check is never the only
 door. An unusable URL is stored, refused at the point of use, and reported
-through `status.get` as `url not valid; idle`.
+through `status.get` as `server url not valid; idle`. The reasons are kept
+distinct — no server, an unusable server, and no topics are three different
+fixes, and one shared message would send an operator to the wrong field.
 
 ## Filtering
 
@@ -167,11 +180,53 @@ second one at column 1, above the banner, where nothing marks it as untrusted.
 
 Quote it; do not obey it.
 
+## Several topics, one connection — and why the cursor is per topic
+
+Every topic rides **one** connection: ntfy accepts a comma-joined list
+(`/alpha,beta/json`) and stamps each message with the topic it belongs to, so a
+second socket would buy nothing. Messages are routed by that field, never by the
+request — the path names every topic at once, so a router reading the URL would
+send all of them to whichever seat sorted first.
+
+The **cursor, though, is per topic**, and that is not a tidiness choice. It was
+measured against ntfy.sh:
+
+```
+publish A1, B1, A2, B2   across topics A and B
+GET /A,B/json?poll=1&since=<id of A2>   ->   returns B2 only
+```
+
+`since=<id>` does not mean "resume after that message". ntfy resolves the id to
+its **timestamp** and filters every topic by time, so B1 — never delivered — is
+dropped for being older than the cursor. Timestamps have second granularity, so
+two messages published in the same second on different topics collapse
+entirely: a cursor on one loses the other permanently, with no error and no gap
+to notice. On a GitHub-fed topic, where a push and its CI result land in the
+same second routinely, that is silent, unrecoverable loss.
+
+So each topic remembers its own last id. On reconnect the single `since` the
+request can carry is the **oldest** of them, which means some messages arrive
+twice — and that is fine, because the `seen` list already makes delivery
+idempotent. **Re-delivery is recoverable; skipping is not**, and the whole
+choice is that asymmetry.
+
+A topic with no cursor yet forces `latest` for the request rather than `all`:
+adding a topic should not replay its entire retained history into the inbox.
+
+## What a seat costs, per seat
+
+The rate budget is **per seat**, not per plugin. Seats do not share a context
+window, and a shared budget would let one noisy topic starve every other seat —
+the quiet topic that only fires on a release would find the allowance gone at
+exactly the moment its one message matters. The held-back notice is per seat for
+the same reason: a shared one would tell a seat about messages held from
+somebody else.
+
 ## Delivery
 
 One connection at a time, reconnecting with a jittered 2s→60s backoff. The last
-handled message id is persisted, so a restart resumes with `since=<id>` rather
-than replaying the topic or missing it.
+handled message id is persisted per topic, so a restart resumes with
+`since=<id>` rather than replaying a topic or missing it.
 
 A non-200 is logged with its status code rather than only recorded: a 401 from a
 server wanting a bearer, or a 404 from a topic that does not exist, is a

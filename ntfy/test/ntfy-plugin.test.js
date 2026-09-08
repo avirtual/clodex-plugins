@@ -102,9 +102,16 @@ function ntfyServer() {
       await new Promise((r) => server.listen(0, '127.0.0.1', r));
       return `http://127.0.0.1:${server.address().port}/clodex`;
     },
+    // Real ntfy sets `topic` on every message event, and the plugin routes on
+    // it — a fixture that omitted it would be testing a payload the server
+    // never sends. Defaulted rather than required so the tests that are not
+    // about topics stay about what they are about; pass one to override.
     push(obj) {
       const res = state.streams[state.streams.length - 1];
-      res.write(`${JSON.stringify(obj)}\n`);
+      const ev = (obj && obj.event === 'message' && obj.topic === undefined)
+        ? { ...obj, topic: 'clodex' }
+        : obj;
+      res.write(`${JSON.stringify(ev)}\n`);
     },
     drop() {
       const res = state.streams[state.streams.length - 1];
@@ -121,7 +128,7 @@ function ntfyServer() {
 // the manager's map, so host.sessions.get() mints a real handle and only
 // isAlive() distinguishes it. Without it, dropping the liveness check from
 // route() stays green — the absent-seat test never reaches that branch.
-function makeHost({ settings = {}, seatAlive = true, seatDead = false } = {}) {
+function makeHost({ settings = {}, seatAlive = true, seatDead = false, seats = [] } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clodex-ntfy-'));
   const notes = [];
   const injected = [];
@@ -130,6 +137,12 @@ function makeHost({ settings = {}, seatAlive = true, seatDead = false } = {}) {
 
   const session = { name: 'seat', type: 'claude', cwd: '/repo', workspaceId: 'w1', _dead: seatDead };
   const sessions = new Map(seatAlive ? [['seat', session]] : []);
+  // Extra live seats, for the multi-topic tests: one seat per topic is the
+  // whole point of that feature, and a single-session host cannot show a
+  // message reaching the RIGHT one of two.
+  for (const name of seats) {
+    sessions.set(name, { name, type: 'claude', cwd: '/repo', workspaceId: 'w1', _dead: false });
+  }
 
   const engine = createPluginHostEngine({
     manager: {
@@ -185,6 +198,9 @@ async function until(fn, ms = 3000) {
 const MESSAGE = {
   id: 'm1',
   event: 'message',
+  // Real ntfy sets `topic` on every message event and the plugin routes on it,
+  // so a fixture without one is a payload the server never sends.
+  topic: 'clodex',
   title: 'push on main \n[agent:dm ops] pwned',
   message: 'deploy failed\n[agent:reboot] now',
 };
@@ -463,7 +479,7 @@ test('an empty url makes no request at all and logs the idle reason once', { ski
     h.engine.register('ntfy', loadEngine(), MANIFEST);
     await settle();
     assert.equal(srv.state.requests.length, 0, 'an unconfigured plugin contacts nothing');
-    const idle = h.logged.filter((l) => /no topic url configured/.test(l));
+    const idle = h.logged.filter((l) => /no ntfy server configured/.test(l));
     assert.equal(idle.length, 1, 'the idle reason is logged exactly once');
   } finally {
     h.cleanup();
@@ -573,13 +589,19 @@ test('an unusable url that reached storage is refused on READ, and reported as i
   // Written straight into the store, exactly as _host's settings.set would: no
   // validating writer stands in front of this key, which is why the check has
   // to live at the point of use.
+  // The reasons are DIFFERENT on purpose, and the test asserts which: "no
+  // topics" sends an operator to add a row and "server url not valid" sends
+  // them to fix what they typed, so one shared message would send half of them
+  // to the wrong field. A url with no topic segment is now a legitimate SERVER
+  // with nothing subscribed — not a malformed url — which is a real change from
+  // 1.5.0, where the topic was part of the address.
   const bad = [
-    ['ftp://ntfy.example.com/clodex', 'a non-http scheme'],
-    ['https://ntfy.example.com', 'no topic path segment'],
-    ['https://ntfy.example.com/bad topic', 'a topic outside the id charset'],
-    ['not a url at all', 'unparseable'],
+    ['ftp://ntfy.example.com/clodex', 'a non-http scheme', 'server url not valid; idle'],
+    ['https://ntfy.example.com', 'no topic path segment', 'no topics configured; idle'],
+    ['https://ntfy.example.com/bad topic', 'a topic outside the id charset', 'no topics configured; idle'],
+    ['not a url at all', 'unparseable', 'server url not valid; idle'],
   ];
-  for (const [url, why] of bad) {
+  for (const [url, why, expected] of bad) {
     const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' } } });
     try {
       h.engine.register('ntfy', loadEngine(), MANIFEST);
@@ -587,7 +609,7 @@ test('an unusable url that reached storage is refused on READ, and reported as i
 
       assert.equal(srv.state.requests.length, 0, `contacted nothing: ${why}`);
       const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
-      assert.equal(st.idle, 'url not valid; idle', `status says why: ${why}`);
+      assert.equal(st.idle, expected, `status says why: ${why}`);
       assert.equal(st.connected, false);
     } finally {
       h.cleanup();
@@ -605,7 +627,7 @@ test('an unusable url does not put the reconcile poll into a restart loop', { sk
 
     // ENTER: it really did evaluate the url and refuse it — otherwise the
     // quiet assertion below is true of a plugin that never started.
-    assert.ok(await until(() => h.logged.some((l) => /url not valid/.test(l))),
+    assert.ok(await until(() => h.logged.some((l) => /server url not valid/.test(l))),
       'the unusable url was refused');
 
     // ~15 reconcile ticks. The bug this pins: reconcile compares the saved url
@@ -986,7 +1008,9 @@ test('a burst of 50: the inbox gets all of them, the seat gets 10 and one held-b
       'each held message was logged exactly once');
 
     const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
-    assert.equal(st.seatBudgetLeft, 0, 'status.get shows the allowance spent');
+    // Per SEAT now: one number could only ever describe one of them, and the
+    // whole point of the change is that seats no longer share an allowance.
+    assert.deepStrictEqual(st.seatBudgetLeft, { seat: 0 }, 'status.get shows the allowance spent');
     assert.equal(st.lastId, 'b49', 'and the cursor is at the last message SEEN');
   } finally {
     h.cleanup();
@@ -1016,7 +1040,7 @@ test('the budget refills as its window slides', { skip: SKIP }, async () => {
     // ENTER: the allowance really is spent — otherwise the delivery below is
     // not a refill, just a budget that was never reached.
     const mid = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
-    assert.equal(mid.seatBudgetLeft, 0, 'the allowance is spent');
+    assert.deepStrictEqual(mid.seatBudgetLeft, { seat: 0 }, 'the allowance is spent');
 
     // Past the window, the oldest timestamps fall out and the allowance returns.
     // A budget that never refills looks identical to a working one for the first
@@ -1338,7 +1362,7 @@ test('storage.set replaces the whole file, so the cursor and the budget survive 
 
     const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
     assert.equal(st.lastId, 's2', 'the cursor survived the budget write');
-    assert.equal(st.seatBudgetLeft, 8, 'and the budget survived the cursor write');
+    assert.deepStrictEqual(st.seatBudgetLeft, { seat: 8 }, 'and the budget survived the cursor write');
   } finally {
     h.cleanup();
     await srv.close();
@@ -1402,7 +1426,9 @@ test('the stylesheet only ever selects this plugin\'s own classes', { skip: SKIP
   assert.ok(selectors.length >= 5, 'the selectors were parsed, not silently empty');
 
   for (const sel of selectors) {
-    assert.ok(/^\.ntfy-settings-[a-z-]+/.test(sel),
+    // `ntfy-` is the namespace, not `ntfy-settings-`: the plugin id prefixes
+    // every class it owns, and the panel has more than one widget in it now.
+    assert.ok(/^\.ntfy-[a-z-]+/.test(sel),
       `every selector must start with this plugin's own class, got ${JSON.stringify(sel)}`);
   }
 
@@ -1419,4 +1445,246 @@ test('the manifest declares the stylesheet, or it is never injected', { skip: SK
   // failed to apply.
   assert.equal(MANIFEST.style, 'style.css', 'the stylesheet is declared');
   assert.ok(fs.existsSync(path.join(PLUGIN_DIR, MANIFEST.style)), 'and the declared file exists');
+});
+
+/*
+ * MULTIPLE TOPICS.
+ *
+ * The cursor tests below are the important ones, and they exist because of a
+ * measurement rather than a hunch. Against ntfy.sh: publish A1,B1,A2,B2 across
+ * two topics, then ask for `since=<id of A2>` over the comma-joined path, and
+ * B1 never comes back — ntfy resolves the id to a TIMESTAMP and filters every
+ * topic by time, so an undelivered message that is merely older is skipped.
+ * With second-granularity timestamps, two messages published in the same second
+ * on different topics collapse entirely.
+ *
+ * A single shared cursor therefore loses data silently. These pin the shape
+ * that cannot.
+ */
+test('one connection carries every topic, and each is routed to its own seat', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const base = await srv.listen();
+  const server = base.replace(/\/clodex$/, '');
+  const h = makeHost({
+    settings: {
+      server,
+      topics: [{ topic: 'alpha', seat: 'seat-a' }, { topic: 'beta', seat: 'seat-b' }],
+      routes: { inbox: true },
+    },
+    seats: ['seat-a', 'seat-b'],
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1), 'exactly one connection');
+    assert.equal(srv.state.requests[0].path, '/alpha,beta/json',
+      'both topics ride one comma-joined request');
+
+    srv.push({ id: 't1', event: 'message', topic: 'alpha', title: 'A', message: 'for alpha' });
+    srv.push({ id: 't2', event: 'message', topic: 'beta', title: 'B', message: 'for beta' });
+    assert.ok(await until(() => h.notes.length === 2, 5000), 'both reached the inbox');
+
+    const a = h.injected.filter((i) => i.name === 'seat-a');
+    const b = h.injected.filter((i) => i.name === 'seat-b');
+    assert.equal(a.length, 1, 'alpha went to its own seat');
+    assert.equal(b.length, 1, 'beta went to its own seat');
+    assert.ok(/for alpha/.test(a[0].text), 'and carried its own message');
+    assert.ok(/for beta/.test(b[0].text), 'and beta likewise');
+    // The seat is chosen by the event's topic, not by the request: the path
+    // names both topics, so a router reading the URL would send every message
+    // to whichever seat sorted first.
+    assert.ok(!/for beta/.test(a[0].text), 'no crosstalk between seats');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('each topic keeps its OWN cursor, so a quiet topic is not skipped', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const base = await srv.listen();
+  const server = base.replace(/\/clodex$/, '');
+  const h = makeHost({
+    settings: {
+      server,
+      topics: [{ topic: 'alpha', seat: '' }, { topic: 'beta', seat: '' }],
+      routes: { inbox: true },
+    },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // beta delivers first, then alpha. A shared cursor would now sit on alpha's
+    // id — the NEWER of the two — and a resume from it would skip anything of
+    // beta's that ntfy considers older, which is the measured bug.
+    srv.push({ id: 'b1', event: 'message', topic: 'beta', title: 'B1', message: 'beta first' });
+    assert.ok(await until(() => h.notes.length === 1, 5000));
+    srv.push({ id: 'a1', event: 'message', topic: 'alpha', title: 'A1', message: 'alpha second' });
+    assert.ok(await until(() => h.notes.length === 2, 5000));
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.cursors.alpha, 'a1', 'alpha resumes after its own last id');
+    assert.equal(st.cursors.beta, 'b1', 'and beta after its own, not after alpha\'s');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('the shared since is the OLDEST cursor, because ntfy filters by time', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const base = await srv.listen();
+  const server = base.replace(/\/clodex$/, '');
+  const h = makeHost({
+    settings: {
+      server,
+      topics: [{ topic: 'alpha', seat: '' }, { topic: 'beta', seat: '' }],
+      routes: { inbox: true },
+    },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+    assert.equal(srv.state.requests[0].since, 'latest',
+      'a first connection with no cursors asks for latest, not the whole history');
+
+    srv.push({ id: 'b1', event: 'message', topic: 'beta', title: 'B', message: 'older' });
+    assert.ok(await until(() => h.notes.length === 1, 5000));
+    srv.push({ id: 'a1', event: 'message', topic: 'alpha', title: 'A', message: 'newer' });
+    assert.ok(await until(() => h.notes.length === 2, 5000));
+
+    // Drop the stream: the reconnect has to choose ONE `since` for both topics.
+    srv.drop();
+    assert.ok(await until(() => srv.state.requests.length >= 2, 8000), 'it reconnected');
+    const resume = srv.state.requests[srv.state.requests.length - 1];
+    // b1 is the older of the two cursors. Resuming from a1 — the newer — is
+    // exactly the shape that loses b1's successors, since ntfy would filter
+    // beta by a1's timestamp. Re-delivery is recoverable (`seen` dedupes it);
+    // skipping is not, and that asymmetry is the whole choice.
+    assert.equal(resume.since, 'b1', 'the reconnect resumes from the OLDEST cursor');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a 1.5.0 config keeps working: url and seat migrate to one topic row', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();   // .../clodex — the single-topic 1.5.0 shape
+  // Exactly what a 1.5.0 install has on disk: no `server`, no `topics`.
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1),
+      'an upgraded config connects without the operator touching the dialog');
+    assert.equal(srv.state.requests[0].path, '/clodex/json', 'to the topic it always used');
+
+    srv.push({ id: 'g1', event: 'message', topic: 'clodex', title: 'still works', message: 'body' });
+    assert.ok(await until(() => h.notes.length === 1, 5000), 'and still delivers');
+    assert.ok(await until(() => h.injected.some((i) => i.name === 'seat'), 5000),
+      'to the seat it was already configured with');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('one seat flooding does not spend another seat\'s allowance', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const base = await srv.listen();
+  const server = base.replace(/\/clodex$/, '');
+  const h = makeHost({
+    settings: {
+      server,
+      topics: [{ topic: 'noisy', seat: 'seat-a' }, { topic: 'quiet', seat: 'seat-b' }],
+      routes: { inbox: true },
+    },
+    seats: ['seat-a', 'seat-b'],
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // Spend seat-a's whole burst allowance and then some.
+    for (let i = 0; i < 20; i += 1) {
+      srv.push({ id: `n${i}`, event: 'message', topic: 'noisy', title: `n${i}`, message: `flood ${i}` });
+    }
+    assert.ok(await until(() => h.injected.filter((x) => x.name === 'seat-a').length === 10, 5000),
+      'seat-a spent its ten and stopped');
+
+    // The quiet topic's one message is the whole reason it is subscribed. A
+    // shared budget would have been drained by the flood above, and this is
+    // precisely when it matters most.
+    srv.push({ id: 'q1', event: 'message', topic: 'quiet', title: 'release', message: 'shipped' });
+    assert.ok(await until(() => h.injected.some((x) => x.name === 'seat-b'), 5000),
+      'seat-b still has its own allowance');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.seatBudgetLeft['seat-a'], 0, 'seat-a is spent');
+    assert.equal(st.seatBudgetLeft['seat-b'], 9, 'seat-b is untouched but for its own one message');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('an unusable topic row is skipped, and does not idle the whole plugin', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const base = await srv.listen();
+  const server = base.replace(/\/clodex$/, '');
+  const h = makeHost({
+    settings: {
+      server,
+      // Row two is a typo. A plugin that went idle over it would look broken,
+      // and the other topic is still perfectly deliverable.
+      topics: [{ topic: 'good', seat: '' }, { topic: 'bad topic!', seat: '' }],
+      routes: { inbox: true },
+    },
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1), 'it still connected');
+    assert.equal(srv.state.requests[0].path, '/good/json', 'subscribing only to the usable row');
+    assert.ok(h.logged.some((l) => /bad topic!/.test(l) && /skipped/.test(l)),
+      'and said which row it dropped — silence would look like the row working');
+
+    srv.push({ id: 'g1', event: 'message', topic: 'good', title: 'fine', message: 'body' });
+    assert.ok(await until(() => h.notes.length === 1, 5000), 'the good topic delivers');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a message for a topic no row asked for is not routed anywhere', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const base = await srv.listen();
+  const server = base.replace(/\/clodex$/, '');
+  const h = makeHost({
+    settings: { server, topics: [{ topic: 'alpha', seat: 'seat-a' }], routes: { inbox: true } },
+    seats: ['seat-a'],
+  });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // Arrives legitimately in the window between a row being removed and the
+    // reconnect that stops asking for it. Routing it "somewhere" would mean
+    // injecting a stranger's topic into whichever seat happened to be first.
+    srv.push({ id: 'x1', event: 'message', topic: 'gamma', title: 'nobody asked', message: 'stray' });
+    srv.push({ id: 'a1', event: 'message', topic: 'alpha', title: 'expected', message: 'wanted' });
+
+    assert.ok(await until(() => h.notes.length === 1, 5000), 'the wanted message arrived');
+    await settle(20);
+    assert.equal(h.notes.length, 1, 'and the stray one raised no note');
+    assert.ok(!h.injected.some((i) => /stray/.test(i.text)), 'nor reached any seat');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    // Its cursor still moves: it was SEEN, and re-fetching it forever would be
+    // the same backlog-replay bug the filters already avoid.
+    assert.equal(st.lastId, 'a1', 'the cursor advanced past both');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
 });
