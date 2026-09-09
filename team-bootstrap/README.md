@@ -22,7 +22,18 @@ plugin or by any team verb. It holds no settings and no plugin storage.
 
 - **Clodex ≥ 5.42.0**, for `[agent:team template-save]` and
   `[agent:team prompt-save]`. Without them a lead can create roles but cannot
-  write the files those roles name.
+  write the files those roles name. This is the floor for the plugin as a whole.
+- **Clodex ≥ 5.46.0** for the shorter path, and the skill degrades cleanly below
+  it rather than refusing:
+  - `model:` on `role-add`/`role-set`, which derives a role's template instead of
+    making the lead hand-write one. On an older host the kv is *silently ignored*,
+    not refused, so the skill uses `template-save` there.
+  - the lean stock hand template — `--model claude-opus-5`, every skill off,
+    a trimmed tool list. Below 5.46.0 the shipped hand carries no model at all, so
+    the interview has to ask for one outright.
+  - the `clodex-run-tests` exec, a one-line suite digest for any project with
+    `scripts/run-tests.js`. Below 5.46.0 the library def points at a script only
+    the Clodex repo has; treat the grant as absent.
 - **The `team-create` intent, ticked on the interviewing seat.** It is
   *privileged*: unlike ordinary verbs it is off unless the operator granted it
   explicitly, and an all-enabled seat does **not** get it by default. Session ⚙
@@ -52,6 +63,10 @@ a team that works and one that looks configured:
 - **`lead` and `reviewer` are operator-owned.** No intent may edit or remove
   them, so a "lead only" team keeps a reviewer definition and a different model
   for the lead is an app-side change. The skill says so instead of retrying.
+- **The interview does not choose models by inheritance.** It offers the stock
+  hand template's default and asks only whether to override it — a contact agent
+  running on an expensive seat must not hand that class to every role, since a
+  team is a standing cost the operator pays per ticket.
 
 It also carries the ordering that is not obvious: emit `create` **alone**, read
 its reply, and spawn the lead only after it succeeded. Intents in one reply all
@@ -82,7 +97,7 @@ or install it by source spec:
 
 ```
 avirtual/clodex-plugins:team-bootstrap                        # follows the default branch
-avirtual/clodex-plugins@team-bootstrap-v0.1.1:team-bootstrap  # frozen, never updates
+avirtual/clodex-plugins@team-bootstrap-v0.1.2:team-bootstrap  # frozen, never updates
 ```
 
 Then tick the plugin on the seat that should hold it. Content reaches only seats

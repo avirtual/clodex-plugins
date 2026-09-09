@@ -55,15 +55,34 @@ are yours to apply silently if the operator has already implied them.
 2. **Lead seat name** [`<team>-lead`]. It must not be a name that already exists.
 3. **Shape.** Propose one and say why in a line — see *Shapes* below. The operator
    can rename roles or add more.
-4. **Model per role** [whatever you are running]. Free text you pass into the
-   role's template as `extraArgs`. Current ids: `claude-opus-5`,
-   `claude-sonnet-5`, `claude-fable-5-1`; a `[1m]` suffix asks for the 1M-context
-   variant, e.g. `claude-fable-5-1[1m]`.
-5. **Does the project have `scripts/run-tests.js` emitting TAP?** If not, say
-   plainly: *the merge gate will escalate every ticket to the lead instead of
-   rejecting it — the loop still works, it just is not autonomous.* **Do not
-   create that file**, and do not offer to. A project with no suite is a
-   first-class case, not a broken one.
+4. **Model per role — an override question, not a specification.** Do *not*
+   default to what you are running: you may be an expensive seat, and a hand that
+   inherits your class costs the operator real money on every ticket. Ask:
+
+   > The stock hand template sets the model and disables every skill (as of
+   > Clodex 5.46.0: Opus, no skills). Want to override any role's model?
+
+   Take the answer as an **alias** — `opus`, `sonnet`, `haiku`, `fable` — which is
+   what the `model:` kv accepts, alongside a bare model id. A **bracketed id like
+   `claude-opus-5[1m]` cannot be written in a kv at all**: the intent parser stops
+   at the first `]`. If the operator asks for a 1M-context variant, say that it
+   needs a template the lead writes by hand, and take the alias for now.
+
+   Name the version when you quote the default, exactly as above. You cannot read
+   the stock template from here — it lives in Clodex, not in this plugin — so a
+   bare "hands are Opus" goes stale silently the day it changes.
+
+5. **Does the project have `scripts/run-tests.js`?** It must be runnable as
+   `node scripts/run-tests.js --reporter=dot` and print a line of the form
+   `TOTALS: N pass, M fail, K tests`. If it does not exist, say plainly: *the
+   merge gate will escalate every ticket to the lead instead of rejecting it —
+   the loop still works, it just is not autonomous.* **Do not create that file**,
+   and do not offer to. A project with no suite is a first-class case, not a
+   broken one.
+
+   On Clodex ≥ 5.46.0 that one file unlocks two things: the merge gate, and the
+   `clodex-run-tests` exec the stock hand already holds, which runs the suite and
+   returns a one-line digest instead of a screenful.
 6. **Project knowledge** — 5–10 lines the operator dictates: build and test
    commands, directories that are generated, conventions, what breaks in
    non-obvious ways. This becomes `prompts/append/team-project.md`, and it is the
@@ -188,12 +207,17 @@ bare [agent:end].
 [agent:end]
 ```
 
-2. For a standard shape:
+2. For a standard shape, ONE intent — dispatch and model together:
 
 ```
-[agent:team role-set hand dispatch:worktree] implementer; one ticket, one branch, one tree.
+[agent:team role-set hand dispatch:worktree model:<alias>] implementer; one ticket, one branch, one tree.
 [agent:end]
 ```
+
+   Omit `model:` entirely to keep the stock template's own model, which is the
+   right choice unless the operator asked to override it. `model:` derives
+   `templates/hand.json` from the role's current template and points the role at
+   it, so you do NOT write a template for the hand.
 
    For a solo shape, instead:
 
@@ -201,16 +225,29 @@ bare [agent:end].
 [agent:team role-rm hand]
 ```
 
-3. Per EXTRA role only — write its files FIRST, then add the role:
+3. Per EXTRA role only. If the role just needs a different model, one intent
+   does it — the derivation falls back to the stock hand template as its base:
+
+```
+[agent:team role-add <role> prompt:<stem> dispatch:standing model:<alias>] <one-line brief>
+[agent:end]
+```
+
+   Write its system prompt FIRST if you name one:
+
+```
+[agent:team prompt-save system <stem>]
+<the role prompt: how this role behaves, not what the project is>
+[agent:end]
+```
+
+   Only write a template by hand when the role needs a shape the stock hand does
+   not have — different tools, different exec grants, a bracketed model id:
 
 ```
 [agent:team template-save <stem>]
 {"type":"claude","cwd":"${TEAM_ROOT}","extraArgs":["--model","<model-id>"],
  "execCommands":["clodex-team"],"appendPromptFiles":["team-project"]}
-[agent:end]
-
-[agent:team prompt-save system <stem>]
-<the role prompt: how this role behaves, not what the project is>
 [agent:end]
 
 [agent:team role-add <role> template:<stem> prompt:<stem> dispatch:standing] <one-line brief>
@@ -236,15 +273,32 @@ cat ~/.clodex/teams/<team>/team.json
    {"action":"roster","agent":"<lead-seat>"} renders the roster formatted.
 
 Then DM me one paragraph: team name, root, your seat, each role with its
-dispatch, and whether the merge gate has a suite to run
-(scripts/run-tests.js emitting TAP — this project <does / does not> have one,
-so tickets will <be verified / escalate to you>).
+dispatch and its model, and whether the merge gate has a suite to run
+(scripts/run-tests.js — this project <does / does not> have one, so tickets
+will <be verified / escalate to you>).
 [agent:end]
 ````
 
 The lead **unfences them when it emits them** — a fenced intent does not fire, on
 its screen either. Say so in the briefing if the lead seems to be quoting them
 back rather than running them.
+
+### On a host below Clodex 5.46.0
+
+`model:` does not exist there and the stock hand carries no model of its own, so
+the briefing above degrades to the older shape:
+
+- step 2 is `[agent:team role-set hand dispatch:worktree]` with no `model:`, and a
+  hand that needs a specific model needs a hand-written template;
+- step 3 always writes `template-save` before `role-add`, for every extra role;
+- interview question 4 goes back to asking for a model outright, because there is
+  no stock default to defer to;
+- the `clodex-run-tests` exec is not usable — below 5.46.0 the library def points
+  at a script only the Clodex repo has, so treat that grant as absent.
+
+You will know from the bounce: a `model:` kv on an older host is ignored rather
+than refused, which shows up as a role whose template never changed. If the
+operator reports that, check the host version before debugging anything else.
 
 ### The rules that bite, and why each is in the briefing
 
@@ -268,12 +322,28 @@ back rather than running them.
   An absolute path is refused because it could point a seat at another project,
   and a relative path that is not there yet is refused too. Create the directory
   before naming it, or omit `cwd` entirely.
-- **Write a template or prompt before the role that names it.** Nothing enforces
-  this — a role may name a stem that does not exist and the write succeeds — but
-  team preflight will flag the role as **missing** until the file lands, and a
-  seat spawned in that window boots with no system prompt at all. (Deleting runs
-  the other way: `template-rm` and `prompt-rm system` are refused while a role
-  still names the stem.)
+- **Write a template or prompt before the role that names it.** This still bites
+  on **extra roles** — the hand no longer needs it, but any role whose
+  `prompt:` or `template:` names a stem does. Nothing enforces the order: a role
+  may name a stem that does not exist and the write succeeds, but team preflight
+  flags the role as **missing** until the file lands, and a seat spawned in that
+  window boots with no system prompt at all. (Deleting runs the other way:
+  `template-rm` and `prompt-rm system` are refused while a role still names the
+  stem.)
+- **`model:` derives a template; it does not edit one.** It reads the role's
+  current template (or the stock `clodex-team-hand` when the role has none),
+  swaps in `--model`, and saves the result as `templates/<role>.json` — then
+  points the role there. Two consequences: the role's template stem becomes the
+  **role's own name**, and repeating `model:` re-derives from that own copy, so
+  exactly one `--model` ever survives. Running it twice is safe.
+- **A failed intent never changes a live template.** The derivation is undone if
+  anything else on the same intent line is refused — a bad `dispatch:`, a bad
+  `cwd:`, a reserved role. So a bounce means nothing happened, not that half of
+  it did.
+- **`model:` takes an alias or a bare id, never a bracketed one.** `opus`,
+  `sonnet`, `haiku`, `fable`. `claude-opus-5[1m]` is unwritable as a kv because
+  the intent parser stops at the first `]`; that variant needs a hand-written
+  template.
 - **Bodies cap at 64KB**, which is the intent transport's limit, not the file's.
 
 ### `[agent:team gather]` — optional, and it has a cost
@@ -298,9 +368,9 @@ Operator: *"I want a project that does invoice parsing and I need a team. Root i
 `/Users/me/code/invoices`."*
 
 You ask three questions (name → `invoices`; lead → `invoices-lead`; shape →
-standard, because it is a code project with commits to isolate), learn there is no
-`scripts/run-tests.js`, and take six lines of project knowledge. Then you emit
-one intent and end your turn:
+standard, because it is a code project with commits to isolate), offer the stock
+hand default and hear no override, learn there is no `scripts/run-tests.js`, and
+take six lines of project knowledge. Then you emit one intent and end your turn:
 
 ```
 [agent:team create invoices root:/Users/me/code/invoices lead:invoices-lead]
@@ -318,19 +388,25 @@ already wrote the hand and the reviewer. The lead reads its roster back, DMs you
 and you tell the operator:
 
 > Team **invoices** is up at `/Users/me/code/invoices`, led by `invoices-lead`.
-> Its `hand` role takes a fresh branch, worktree and seat per ticket; a `reviewer`
-> role is defined and spawns on demand. Your project notes are in the team's own
-> `team-project` append prompt, so every ticket seat boots holding them. There is
-> no `scripts/run-tests.js`, so the merge gate can't verify a branch itself —
-> every ticket will escalate to the lead for a judgement call, which works but
-> isn't autonomous. Ask `invoices-lead` for the first ticket whenever you like.
+> Its `hand` role takes a fresh branch, worktree and seat per ticket, on the stock
+> hand template — Opus with every skill off, which is the cheap-by-default shape;
+> a `reviewer` role is defined and spawns on demand. Your project notes are in the
+> team's own `team-project` append prompt, so every ticket seat boots holding
+> them. There is no `scripts/run-tests.js`, so the merge gate can't verify a
+> branch itself — every ticket will escalate to the lead for a judgement call,
+> which works but isn't autonomous. Ask `invoices-lead` for the first ticket
+> whenever you like.
 
 ## What to report, and what not to
 
 Report **what the operator can now do**, not a file listing. They did not ask for
 `team.json`; they asked for a team. Name the team, the root, the lead seat they
-can talk to, each role and whether a ticket for it gets its own branch, and the
-one honest caveat about tests.
+can talk to, each role and whether a ticket for it gets its own branch, what
+model the hands run and that skills are off, and the one honest caveat about
+tests.
+
+The model line is worth a clause of its own: a team is a standing cost, and an
+operator who does not know what class their hands are will find out from a bill.
 
 If something was refused, say which thing and what the operator would have to do
 themselves — an app-side edit for `lead`/`reviewer`, a directory that has to exist
