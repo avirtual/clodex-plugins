@@ -96,24 +96,46 @@ Tell the operator that rather than reporting a removal that did not happen.
 
 ## Step 2 — what you emit
 
-Two intents, in this order, each alone on its line.
+Two intents — but **in two separate replies**, not one.
+
+### First reply: the create, alone
 
 ```
 [agent:team create <team> root:<abs-root> lead:<lead-seat>]
 ```
 
+(Fenced here because this file is documentation. **You emit it unfenced**, at
+column 1, with the placeholders filled in — a fenced intent does not fire.)
+
+Then **end your turn and read the reply.** It comes back as an `[agent:team]`
+line, and it is either
+
+> `team "<team>" created — root …, lead …, dir …`
+
+or a refusal: a missing grant, a root that is not a directory, a name already
+taken. **Do not emit the spawn in the same reply as the create.** Intents in one
+reply all fire — a create that bounces does not stop the spawn beside it, and you
+get the teamless lead described below, plus a seat you now have to explain. This
+is the single most likely way to get this wrong, and it has happened in practice.
+
+### Second reply, only after the create succeeded: the spawn
+
 ```
 [agent:spawn name:<lead-seat> cwd:<abs-root>]
 ```
 
-(Fenced here because this file is documentation. **You emit them unfenced**, at
-column 1, with the placeholders filled in — a fenced intent does not fire.)
+**The order is load-bearing.** A seat's team is resolved from its cwd *at boot*,
+and the roster it receives is delivered at spawn. Spawn the lead before the team
+exists and it boots with no team block and no roster: it is a lead that does not
+know it leads, or who else is on the team.
 
-**The order is load-bearing, and not for the obvious reason.** A seat's team is
-resolved from its cwd *at boot*, and the roster it receives is delivered once and
-stamped for the seat's whole life. Spawn the lead before the team exists and it
-boots with no team block and no roster — and it never gets one, even though the
-team verbs would still work. It would be a lead that does not know it leads.
+**It is recoverable, and you do not need a restart or a reload.** Every team verb
+resolves the team from the seat's cwd *at emit time*, not from anything captured
+at boot — so a lead spawned early can still run the entire briefing, and it works.
+What such a seat misses is the *introduction*: the roster message is delivered at
+spawn, so a seat that booted teamless does not receive one. If this happens, name
+the team and the root in your briefing and carry on. Do not respawn the lead over
+it, and do not tell the operator the team is broken — it is not.
 
 Three things to get right in the spawn:
 
@@ -195,13 +217,23 @@ bare [agent:end].
 [agent:end]
 ```
 
-4. Read your own roster back and report it:
+4. Read your roster back and check it. A team this new has **no exec defs at
+   all**, so read the file with your own shell:
 
 ```
-[agent:exec clodex-team] {"action":"roster","agent":"<lead-seat>"}
+cat ~/.clodex/teams/<team>/team.json
 ```
 
-   — or [agent:task list] if that exec command is not granted to you.
+   Then emit a bare
+
+```
+[agent:task list]
+```
+
+   to confirm the board resolves from your cwd — on a new team it answers
+   "no tickets on <team>", and that answer *is* the confirmation. If the operator
+   later grants you the clodex-team exec command, an exec of it with
+   {"action":"roster","agent":"<lead-seat>"} renders the roster formatted.
 
 Then DM me one paragraph: team name, root, your seat, each role with its
 dispatch, and whether the merge gate has a suite to run
@@ -267,16 +299,20 @@ Operator: *"I want a project that does invoice parsing and I need a team. Root i
 
 You ask three questions (name → `invoices`; lead → `invoices-lead`; shape →
 standard, because it is a code project with commits to isolate), learn there is no
-`scripts/run-tests.js`, and take six lines of project knowledge. Then you emit:
+`scripts/run-tests.js`, and take six lines of project knowledge. Then you emit
+one intent and end your turn:
 
 ```
 [agent:team create invoices root:/Users/me/code/invoices lead:invoices-lead]
 ```
+
+The reply says the team was created. **Only then**, in your next reply:
+
 ```
 [agent:spawn name:invoices-lead cwd:/Users/me/code/invoices]
 ```
 
-and DM `invoices-lead` a briefing whose whole configuration step is two intents —
+and you DM `invoices-lead` a briefing whose whole configuration step is two intents —
 the append prompt, and `role-set hand dispatch:worktree` — because `create`
 already wrote the hand and the reviewer. The lead reads its roster back, DMs you,
 and you tell the operator:

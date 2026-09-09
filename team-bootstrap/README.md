@@ -53,9 +53,12 @@ a team that works and one that looks configured:
   them, so a "lead only" team keeps a reviewer definition and a different model
   for the lead is an app-side change. The skill says so instead of retrying.
 
-It also carries the ordering that is not obvious: spawn the lead **after**
-`create`, because a seat resolves its team from its cwd at boot and receives its
-roster once. Spawned first, it is a lead that does not know it leads.
+It also carries the ordering that is not obvious: emit `create` **alone**, read
+its reply, and spawn the lead only after it succeeded. Intents in one reply all
+fire, so a create that bounces still leaves you a spawned seat — and a seat
+resolves its team from its cwd at boot, so that one boots as a lead that does not
+know it leads. Recoverable without a restart (team verbs re-resolve at emit time),
+but it costs an explanation the operator did not need.
 
 ## What it deliberately does not do
 
@@ -79,7 +82,7 @@ or install it by source spec:
 
 ```
 avirtual/clodex-plugins:team-bootstrap                        # follows the default branch
-avirtual/clodex-plugins@team-bootstrap-v0.1.0:team-bootstrap  # frozen, never updates
+avirtual/clodex-plugins@team-bootstrap-v0.1.1:team-bootstrap  # frozen, never updates
 ```
 
 Then tick the plugin on the seat that should hold it. Content reaches only seats
