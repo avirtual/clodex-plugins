@@ -106,6 +106,12 @@ Evaluated before anything is routed, in this order:
 3. **Ignore titles containing** — case-insensitive substrings, dropped silently.
    Label churn (`labeled`, `unlabeled`) is the motivating case: high volume, no
    information, and the operator has already said they do not want to hear it.
+
+   It is also the lever for a **malformed** title. `?template=github` fills issue
+   fields on every event, including ones that have none — a fork arrives as
+   `clodex: <no value> #<no value>: <no value>`, with a perfectly good body. That
+   rendering happens on the ntfy server, so nothing here can fix it; adding
+   `<no value>` to this field drops those events and matches no real title.
 4. **Duplicate collapse** — the same title and body as any of the last 20 routed
    messages within 10 minutes. The id dedupe cannot do this: a sender
    republishing the same text gets a fresh id every time. Outside the window the
