@@ -10,6 +10,13 @@ reads it, creates or adopts the root, spawns the lead in it, and tells that lead
 which situation it is in. The skill's job is the part Clodex cannot do: work out
 what to put in that intent, and tell the operator what they now have.
 
+On Clodex ≥ 5.55.0 it also decides *how* the lead opens. A brief the operator can
+really write is a kickstart and the lead files a ticket off it; a brief that is
+two sentences because that is all they have goes out as `mode:interview`, and the
+lead asks them about it, rewrites the brief itself, and files nothing until it
+has answers. Recognising which one you are holding is the skill's main judgement
+call.
+
 Content only — no engine, no renderer, no intent verb, and no code of any kind.
 It adds nothing to Clodex; every verb it uses already ships there.
 
@@ -32,6 +39,10 @@ any team verb. It holds no settings and no plugin storage.
   menu → intent checklist → *"Create teams (team create) — privileged, off by
   default"*. The skill checks for it first and stops with one sentence if it is
   missing, rather than interviewing and then failing.
+- **Clodex ≥ 5.55.0** for `mode:interview`. Below it the kv is **dropped
+  silently** — the create runs as a kickstart and reports success — so the skill
+  reads the reply's briefed clause to tell which host it is on, and says so in the
+  report rather than letting the lead treat a rough idea as a spec.
 - **Clodex ≥ 5.49.0** for the one-intent path. Below it the skill degrades in two
   documented steps rather than refusing:
   - **5.48.x** — the brief lands (per-ticket hand, `team-project.md` written) but
@@ -68,15 +79,23 @@ once the host does the configuration:
   with no commits, are refused — and the skill explains which and hands the
   operator the one command, rather than running `git init` over files it did not
   create.
-- **The interview does not choose models by inheritance.** It offers the stock
-  hand template's default and asks only whether to override — a contact agent
-  running on an expensive seat must not hand that class to every role, since a
-  team is a standing cost the operator pays per ticket. An override becomes one
-  short DM to the lead, because `role-set` is lead-only.
+- **Spec or starting point.** The brief question branches on what the operator
+  actually gave. Five lines or more is a kickstart. Two sentences is not a failed
+  interview — it is the case `mode:interview` exists for, and the skill stops
+  pushing and hands the interview to the lead, which will have read the root by
+  the time it asks.
+- **The interview does not choose models by inheritance,** and names no model
+  class. It asks only whether to override the stock hand template — a contact
+  agent running on an expensive seat must not hand that class to every role, since
+  a team is a standing cost the operator pays per ticket. It does not *state* the
+  default, because the file a hand boots on is the operator's own library copy and
+  5.52.0 removed the pin from the shipped one. An override becomes one short DM to
+  the lead, because `role-set` is lead-only.
 - **What it does *not* ask.** Not the test runner: on a takeover the lead reads
   the repo for it, on a new project there is nothing to read. Not the shape of
   the team: create gives you lead + per-ticket hand + reviewer, and anything else
-  is an edit the lead makes later.
+  is an edit the lead makes later. And it does not press for a full spec from an
+  operator who has not formed one.
 - **The greedy-body rules, in the two places they bite.** The brief is the
   intent's body and must be closed by a bare `[agent:end]`, or it swallows the
   rest of the reply into a file every seat reads. And an intent quoted inside a
@@ -84,7 +103,9 @@ once the host does the configuration:
   on the sender, where every team verb is refused.
 - **Reporting that names the scenario.** Which root case ran is visible only in
   the create's reply, and it is the clause that tells an operator whether their
-  files were touched.
+  files were touched. In interview mode the report also warns them that the
+  lead's first message is questions rather than a ticket, and that answering it
+  in the lead's terminal is what turns their two sentences into the real brief.
 
 ## What it deliberately does not do
 
@@ -96,10 +117,11 @@ once the host does the configuration:
 - **It does not brief the lead when there is nothing to add.** The lead's own
   prompt holds its first turn — read the repo or plan the first ticket, then one
   note to the operator. The skill sends a DM only to pass on a model override.
-- **It does not run `[agent:team gather]` by reflex.** Gather forks the stock role
-  prompts out of the library, and a fork stops receiving upstream fixes. The
-  skill keeps the seam create already uses: stock prompts in the library, project
-  specifics in the team's own `team-project` brief.
+- **It does not run `[agent:team gather]`.** Since 5.52.0 create does most of
+  gather's job itself — it copies each role's prompt and template into the team
+  and repoints the role — so on a fresh team gather has nothing left to copy and
+  reports everything kept. The skill says that plainly if asked, notes that gather
+  is lead-only anyway, and does not present a no-op as a step.
 - **It writes no brief content of its own.** The brief is what the operator
   dictates. If they have nothing to say yet, the skill says so rather than
   inventing conventions a whole team will then read as fact.
@@ -111,7 +133,7 @@ or install it by source spec:
 
 ```
 avirtual/clodex-plugins:team-bootstrap                        # follows the default branch
-avirtual/clodex-plugins@team-bootstrap-v0.2.0:team-bootstrap  # frozen, never updates
+avirtual/clodex-plugins@team-bootstrap-v0.3.0:team-bootstrap  # frozen, never updates
 ```
 
 Then tick the plugin on the seat that should hold it. Content reaches only seats

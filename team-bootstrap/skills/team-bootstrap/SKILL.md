@@ -1,5 +1,5 @@
 ---
-description: Interview the operator and stand up a working Clodex team from one intent - create the team, let Clodex spawn and brief its lead, then report what the operator can now do. Usage - /team-bootstrap:team-bootstrap [project root] [what the project does]
+description: Interview the operator and stand up a working Clodex team from one intent - create the team, let Clodex spawn and brief its lead (or have the lead interview them when the brief is only a rough idea), then report what the operator can now do. Usage - /team-bootstrap:team-bootstrap [project root] [what the project does]
 ---
 # Stand up a team for this operator's project
 
@@ -16,6 +16,13 @@ emit, you report. The lead talks to the operator from there.
 So the shape of this skill is: **ask four things, emit one intent, read one line,
 report it.** Nearly all of the configuration work older versions of this skill
 told you to DM the lead is now done inside the host, in order, atomically.
+
+One of those four things decides how the lead opens. A brief the operator can
+actually write is a **kickstart**: the lead treats it as a spec and files a
+ticket. A brief that is two sentences because that is all they have is an
+**interview** (`mode:interview`, Clodex ≥ 5.55.0): the lead treats it as a
+starting point, asks them about it, rewrites it, and only then files. Choosing
+between those is question 4, and it matters more than anything else you ask.
 
 Authority for everything here is `docs/teams.md` in the Clodex repo, section
 *Checklist for a new project*. Where this file and a running Clodex disagree, the
@@ -80,29 +87,50 @@ are yours to apply silently if the operator has already implied them.
    default to what you are running: you may be an expensive seat, and a hand that
    inherits your class costs the operator real money on every ticket. Ask:
 
-   > The stock hand template sets the model and disables every skill (as of
-   > Clodex 5.49.0: Opus, no skills). Want to override it?
+   > The hands boot on the stock team-hand template — the box's default model,
+   > with every skill off. Want to pin a different model for them?
+
+   **Do not name a model class.** You cannot see the file the hands will boot on:
+   it is `~/.clodex/library/templates/clodex-team-hand.json` on *this* operator's
+   box, which they may have edited, and Clodex 5.52.0 removed the `--model` pin
+   from the shipped copy so a stock box now follows the box default. Naming a
+   class is a guess that reads as a fact — the sentence above is true on every
+   host, and it is what a cost question actually needs to say. Skills-off is the
+   half that is still true everywhere, and it is worth saying.
 
    Take the answer as an **alias** — `opus`, `sonnet`, `haiku`, `fable`. **You do
    not apply this yourself**: `role-set` is lead-only, so an override becomes one
    short DM to the lead after it boots (step 3). If the operator has no
-   preference, there is nothing to send and nothing to say beyond naming the
-   default in your report.
+   preference, there is nothing to send.
 
-   Name the version when you quote the default, exactly as above. You cannot read
-   the stock template from here — it lives in Clodex, not in this plugin — so a
-   bare "hands are Opus" goes stale silently the day it changes.
+4. **The brief — and whether it is a spec or a starting point.** The brief is the
+   **body of the intent**, and the one thing the whole team reads: it is saved as
+   `prompts/append/team-project.md`, which the stock lead and hand templates
+   compose at boot.
 
-4. **The brief** — what the project is and what the operator wants built. This is
-   the **body of the intent**, and it is the one thing the whole team reads: it is
-   saved as `prompts/append/team-project.md`, which the stock lead and hand
-   templates compose at boot. Get 5–15 lines. Build and test commands,
-   conventions, what is generated, what breaks in non-obvious ways — plus, for a
-   new project, what it should do.
+   Ask for it, then look at what you got:
 
-   Write what the operator wants **built**, not what you expect Clodex to find:
-   the brief is identical in both root cases, and the lead is told separately
-   which one it is in.
+   - **They gave you real material** (roughly five lines or more — what it does,
+     the stack, build and test commands, conventions, what is generated, what
+     breaks in non-obvious ways). That is a **kickstart**. Omit `mode:` and the
+     lead files a ticket off it.
+   - **They gave you a sentence or two** — *"I want a crypto app, give me a
+     team"*. Do **not** push for 5–15 lines. This is the case `mode:interview`
+     exists for, and pressing the operator for a spec they have not formed yet is
+     the interview the *lead* is better placed to run: it will have read the root
+     by then. Ask exactly one question:
+
+     > Should the lead interview you for the details itself (recommended when you
+     > have only a rough idea), or is this brief complete enough to start work?
+
+     **Default to interview when the brief is under about five lines.** Send what
+     they did say, cleaned up — it does not need to be complete, and in interview
+     mode the lead rewrites it from their answers anyway. A body is still
+     **required**: `mode:interview` with no brief is refused.
+
+   Either way, write what the operator wants **built**, not what you expect
+   Clodex to find: the brief is identical in both root cases, and the lead is
+   told separately which one it is in.
 
 **Do not ask about `scripts/run-tests.js`.** On a takeover the lead reads the repo
 for it; on a new project there is nothing to read and the lead files the runner as
@@ -128,6 +156,20 @@ on its own line.
 (Fenced here because this file is documentation. **You emit it unfenced**, at
 column 1, with the placeholders filled in — a fenced intent does not fire.)
 
+If question 4 landed on an interview, add `mode:interview` to the same line:
+
+```
+[agent:team create <team> root:<abs-root> lead:<lead-seat> mode:interview]
+<one sentence of purpose>
+
+<whatever the operator said, cleaned up — it does not need to be complete>
+[agent:end]
+```
+
+`mode:kickstart` is the default and means exactly what omitting `mode:` means, so
+do not write it. Any other value is refused before anything is written, and so is
+`mode:interview` with an empty body.
+
 Three things to get right:
 
 - **The body is greedy.** It runs to the `[agent:end]` line or to the next
@@ -146,12 +188,23 @@ Then **end your turn and read the reply.**
 ```
 [agent:team] team "shop" created — root /p/shop (new, git init'd), lead shop-lead,
 dir ~/.clodex/teams/shop; hand takes a branch + worktree + seat per ticket; brief
-saved to prompts/append/team-project.md; shop-lead spawned in the root on template
-clodex-team-lead and briefed. Ask shop-lead for your first ticket.
+saved to prompts/append/team-project.md; templates copied to templates/<role>.json
+for lead, hand; prompts copied to prompts/system/<role>.md for lead, hand, reviewer;
+shop-lead spawned in the root on template clodex-team-lead and briefed. Ask
+shop-lead for your first ticket.
 ```
 
 Read the **root clause**: `(new, git init'd)` or `(existing repo, untouched)`.
 That is how you know which scenario ran, and it belongs in your report.
+
+In interview mode the briefed clause is longer — *"and briefed (interview mode:
+it will ask the operator before filing a ticket)."* Read it as confirmation that
+the mode took: on a host below 5.55.0 the `mode:` kv is dropped and you get the
+plain *"and briefed."* instead, with no bounce.
+
+The two **copied** clauses (5.52.0 and up) are informational, not a problem — see
+*What create leaves in the library* below. Do not put them in your report; the
+operator did not ask for a file listing.
 
 Two variants are not failures but change what you say:
 
@@ -161,7 +214,13 @@ Two variants are not failures but change what you say:
   Report that plainly and say it needs installing and the lead respawning.
 - **`… could NOT be spawned (…) — the team is on disk; re-fire [agent:spawn …]`.**
   The team is fine. Emit exactly the spawn the reply hands you, if you hold the
-  `spawn` grant; otherwise pass that command to the operator.
+  `spawn` grant; otherwise pass that command to the operator. **A hand-respawned
+  lead gets no opener** — the first-turn injection rides the create's spawn and is
+  not replayed. So after a successful retry, DM the lead one line naming the arm
+  it is in: the team and root, whether the root is a NEW project or a TAKEOVER,
+  and, if you sent `mode:interview`, that the brief is a starting point another
+  agent wrote and its first turn is the INTERVIEW arm. Without that line it works
+  the wrong arm off the brief alone.
 
 Anything starting `error:` created **nothing** — the message says so explicitly
 and names what would have to change. Do not retry it unchanged, and do not report
@@ -212,11 +271,32 @@ its first turn the lead is told which arm it is in and follows its own prompt:
   only where the two disagree. "What does this project do" is never one of its
   questions, because the repo answered it.
 
-Either way the operator gets one inbox note from the lead. Tell them to expect it.
+**Interview** rides *on top of* whichever of those two it is in — it is not a
+third root case. If you sent `mode:interview`, the lead does its root arm's
+reading, then **files no ticket at all**. Its one note *is* the interview: what it
+understood in two sentences, then at most six questions grouped as what it does /
+who uses it / stack and constraints / what done looks like. When the operator
+answers — in the lead's own terminal, which reaches it as an `[agent:from user]`
+line — the lead rewrites `team-project.md` itself with `prompt-save append
+team-project` and then works the NEW or TAKEOVER arm as if the create had been a
+kickstart.
+
+Either way the operator gets one inbox note from the lead. Tell them to expect
+it, and in interview mode tell them it is questions rather than a ticket, and
+that they answer it by replying to the lead.
 
 ## Older hosts
 
-The plugin floor is Clodex 5.42.0, and the path above degrades in two steps.
+The plugin floor is Clodex 5.42.0, and the path above degrades in steps.
+
+**`mode:` needs 5.55.0.** Below it the parser reads only `root:` and `lead:` and
+**drops every other kv silently** — the create runs as a kickstart, reports
+success, and nothing bounces. There is one discriminator and it is in the reply:
+the briefed clause says *"and briefed (interview mode: it will ask the operator
+before filing a ticket)."* on 5.55.0 and *"and briefed."* below it. If you asked
+question 4 and got the short form back, the lead is going to treat two sentences
+as a spec. Say so in your report and tell the operator the lead will need a
+follow-up, or DM the lead yourself to ask before it files.
 
 **On 5.48.x** the brief works — the body is parsed, the hand is born per-ticket,
 `team-project.md` is written — but create does **not** spawn the lead, does not
@@ -273,26 +353,36 @@ Check the host version before debugging any of this.
   current template (or the stock `clodex-team-hand` when the role has none),
   swaps in `--model`, saves the result as `templates/<role>.json` and points the
   role there. So repeating it is safe — the re-derivation reads the role's own
-  copy, and exactly one `--model` ever survives.
+  copy, and exactly one `--model` ever survives. Since 5.52.0 create has already
+  written `templates/hand.json`, so the derivation reads *that* — the team's own
+  copy — rather than the library.
 - **`model:` takes an alias or a bare id, never a bracketed one.** `opus`,
   `sonnet`, `haiku`, `fable`. `claude-opus-5[1m]` is unwritable as a kv: the
   parser stops at the first `]` and the truncated id is then refused outright, so
   it bounces rather than deriving a wrong template. That variant needs a
   hand-written template.
 
-## If the operator asks about `[agent:team gather]`
+## What create leaves in the library, and `[agent:team gather]`
 
-Gather copies every library piece the team references into the team's own
-directory. It is genuinely useful when the team must be self-contained — moved to
-another machine, or removable without leaving pieces behind.
+As of **Clodex 5.52.0** create does most of gather's job itself. It copies each
+role's system prompt to `prompts/system/<role>.md` and each role's template to
+`templates/<role>.json`, repoints the role at its own copy, and says so in the
+two **copied** clauses of the reply. So a team is already largely
+self-contained the moment it exists, and the three stock role prompts are a
+**fork** from that moment: upstream fixes to `clodex-team-lead.md` and friends no
+longer reach it.
 
-But `docs/teams.md` is explicit that **a gathered copy is a fork and stops
-receiving upstream fixes**, and the stock role prompts ship as library files
-precisely so every team keeps getting improvements to them. So do not suggest it
-by reflex. The seam create already uses is the right one: stock prompts in the
-library, everything project-specific in the team's own `team-project` brief. If
-the operator does want it, `[agent:team gather dry]` shows the plan first, and it
-is a lead-only verb — the lead runs it, not you.
+That is Clodex's choice, not yours, and it is not a problem to report. But it
+changes what you say if the operator asks about gather: the answer is mostly
+*"already done"*. On a freshly created team, gather's plan reports the prompts
+and templates **kept** and finds nothing left to copy — only the team's three
+exec commands show as **missing**, because exec defs are not library pieces on a
+stock box. That is expected and breaks nothing; the execs are granted by the
+templates.
+
+Gather is still the verb for a team that references something *else* from the
+library later. It is **lead-only** — the lead runs it, not you — and
+`[agent:team gather dry]` shows the plan without writing.
 
 ## Worked example
 
@@ -324,12 +414,36 @@ send nothing else, and you tell the operator:
 > git-init'd with one empty commit — led by `invoices-lead`, which is booting
 > now. Its `hand` role takes a fresh branch, worktree and seat per ticket, so two
 > tickets can never collide in one checkout; a `reviewer` role is defined and
-> spawns on demand. Hands run on the stock template: Opus with every skill off,
-> which is the cheap-by-default shape. What you told me is saved as the team's
-> `team-project` brief, so every seat boots holding it. `invoices-lead` will
-> message you shortly with its first ticket and anything it needs from you —
+> spawns on demand. Hands run on the stock team-hand template: the box's default
+> model with every skill off, which is the cheap-by-default shape — say the word
+> if you want them pinned to something specific. What you told me is saved as the
+> team's `team-project` brief, so every seat boots holding it. `invoices-lead`
+> will message you shortly with its first ticket and anything it needs from you —
 > there is no test runner yet, so filing one is almost certainly what it proposes
 > first.
+
+### The same operator, two sentences in
+
+Operator: *"I want a crypto trading tracker, give me a team. Put it in
+`/Users/me/code/tracker`."* — and that is all they have.
+
+Do not interview them into a spec. Take the root and the names as before, ask the
+one interview question from step 4, and on "let the lead ask me" emit:
+
+```
+[agent:team create tracker root:/Users/me/code/tracker lead:tracker-lead mode:interview]
+A tracker for the operator's crypto trading.
+
+What the operator said so far: they want to track crypto trades. Nothing about
+exchanges, holdings, tax treatment, or whether this is a CLI, a service or a UI
+has been decided yet — ask before you build.
+[agent:end]
+```
+
+The reply's briefed clause reads *"and briefed (interview mode: it will ask the
+operator before filing a ticket)."* Your report says the lead will come back with
+questions rather than a ticket, and that answering it in the lead's terminal is
+what turns those two sentences into the real brief.
 
 ## What to report, and what not to
 
@@ -342,12 +456,16 @@ Report **what the operator can now do**, not a file listing. They did not ask fo
   whether their files were touched, and it is the one thing only you can see;
 - **per-ticket isolation** — that a hand ticket gets its own branch, tree and
   seat;
-- the **model class** the hands run and that skills are off. A team is a standing
-  cost, and an operator who does not know what class their hands are will find
-  out from a bill;
+- **what the hands cost**: the stock template, box-default model, every skill
+  off, and that a specific model is one word from them. A team is a standing
+  cost, and an operator who does not know what their hands run will find out from
+  a bill. Do not state a model class you have not read;
+- **which mode ran**, if you sent `mode:interview`: the lead's first message is
+  questions, not a ticket, they answer it in the lead's terminal, and the brief
+  they gave you is a starting point the lead rewrites from their answers;
 - the **test caveat**, framed as the lead's next move rather than a gap: the
   merge gate needs `scripts/run-tests.js`, and the lead will either find one or
-  file it;
+  file it. In interview mode this comes *after* the questions, not first;
 - that **the lead will message them** — so they wait for it rather than asking
   you what happened.
 

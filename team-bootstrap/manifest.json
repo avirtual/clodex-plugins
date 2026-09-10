@@ -1,9 +1,9 @@
 {
   "id": "team-bootstrap",
   "name": "Team Bootstrap",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "hostApi": "1",
   "entry": {},
   "enabledByDefault": false,
-  "announce": "Turns \"I want a project that does X and I need a team\" into a working team: /team-bootstrap:team-bootstrap interviews the operator, then drives the team intents in the order that works — create, spawn the lead, and brief that lead with the role and file verbs only it may run. Content only — no engine, no renderer, no intent verb. Needs the privileged team-create intent on the interviewing seat."
+  "announce": "Turns \"I want a project that does X and I need a team\" into a working team. /team-bootstrap:team-bootstrap interviews the operator, then stands the whole team up with ONE [agent:team create] carrying the brief — Clodex mints the team, creates or adopts the root, and spawns and briefs the lead itself. When the operator has only a rough idea it sends mode:interview instead, and the lead interviews them before filing anything. Content only — no engine, no renderer, no intent verb. Needs the privileged team-create intent on the interviewing seat."
 }
