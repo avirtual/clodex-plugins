@@ -199,6 +199,14 @@ module.exports.activate = (rhost) => {
         + 'labels still arrive. Set your own login here if an agent comments from your account.', 'text');
       mute.value = asList(v.muteAuthors);
 
+      const kinds = field(bodyEl, 'seatMuteKinds', 'Inbox only (not the seat)',
+        'Comma-separated event kinds kept out of the seat: fork, star, watch. They still reach '
+        + 'your inbox. Empty sends everything to the seat.', 'text');
+      // An undefined value is the DEFAULT list, not an empty one, so it must
+      // render as the words it will behave as — a blank box here would tell the
+      // operator forks reach the seat, and saving that blank would make it true.
+      kinds.value = asList(v.seatMuteKinds === undefined ? ['fork', 'star', 'watch'] : v.seatMuteKinds);
+
       statusEl = document.createElement('div');
       statusEl.className = 'ntfy-settings-status';
       statusEl.textContent = 'Checking…';
@@ -224,10 +232,11 @@ module.exports.activate = (rhost) => {
       const allowEl = get('allowFrom');
       const ignoreEl = get('ignoreTitles');
       const muteEl = get('muteAuthors');
+      const kindsEl = get('seatMuteKinds');
       // A missing field means the form is not the one rendered above, and a
       // patch built from defaults would then quietly overwrite real settings
       // with them. Save nothing instead.
-      if (!serverEl || !inboxEl || !allowEl || !ignoreEl || !muteEl) return null;
+      if (!serverEl || !inboxEl || !allowEl || !ignoreEl || !muteEl || !kindsEl) return null;
       // The two lists are handed over as the raw strings they were typed as.
       // Splitting them here would put the parse in two places — the engine has
       // to do it anyway, since it must cope with values that never came through
@@ -248,6 +257,7 @@ module.exports.activate = (rhost) => {
         allowFrom: String(allowEl.value).trim(),
         ignoreTitles: String(ignoreEl.value).trim(),
         muteAuthors: String(muteEl.value).trim(),
+        seatMuteKinds: String(kindsEl.value).trim(),
       };
     },
   });

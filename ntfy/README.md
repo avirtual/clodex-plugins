@@ -25,6 +25,7 @@ Settings ▸ Plugins ▸ ntfy.
 | Only from | Comma-separated tag or title **prefixes**, e.g. `github`. Empty accepts everything. |
 | Ignore titles containing | Comma-separated, case-insensitive substrings, e.g. `labeled, unlabeled`. |
 | Mute comments by | Comma-separated GitHub logins, e.g. `avirtual`. Their **comments** are dropped; opens, closes and labels still arrive. Empty by default — nothing in a message identifies your account, so this cannot be inferred. The author is read from the `<login>: ` prefix on the body's **first line**, which ntfy's template writes; there is no author field to match on. See [Filtering](#filtering). |
+| Inbox only (not the seat) | Comma-separated event kinds that raise an inbox note but are **not** injected into the topic's seat. Defaults to `fork, star, watch` — news for you, noise for an agent. Empty sends everything to the seat. See [Events with no title](#events-with-no-title). |
 
 A private server wanting a bearer token reads it from the environment:
 
@@ -107,11 +108,9 @@ Evaluated before anything is routed, in this order:
    Label churn (`labeled`, `unlabeled`) is the motivating case: high volume, no
    information, and the operator has already said they do not want to hear it.
 
-   It is also the lever for a **malformed** title. `?template=github` fills issue
-   fields on every event, including ones that have none — a fork arrives as
-   `clodex: <no value> #<no value>: <no value>`, with a perfectly good body. That
-   rendering happens on the ntfy server, so nothing here can fix it; adding
-   `<no value>` to this field drops those events and matches no real title.
+   A **malformed** title is no longer this field's job — see
+   [Events with no title](#events-with-no-title). Dropping those events was the
+   only lever before 1.7.0, and it threw away news the operator wanted.
 4. **Duplicate collapse** — the same title and body as any of the last 20 routed
    messages within 10 minutes. The id dedupe cannot do this: a sender
    republishing the same text gets a fresh id every time. Outside the window the
@@ -123,11 +122,59 @@ routed messages would re-fetch every filtered one on the next reconnect, so a
 well-filtered topic would replay its backlog forever and the filters would cost
 more work the better they worked.
 
-All three lists are parsed in the **engine**, on read, and accept either a
+Every list is parsed in the **engine**, on read, and accepts either a
 comma-separated string (what the dialog writes) or an array (what a hand-edited
 `ui-settings.json` holds). Same reason the URL is validated on read: `_host`'s
 `settings.set` answers on both surfaces and can write any plugin's key, so the
 dialog is never the only door.
+
+## Events with no title
+
+`?template=github` renders one title for every event through a branch chain that
+assumes issue-shaped fields. An event that has none of them renders each missing
+field as Go's `<no value>`, so a fork arrives like this:
+
+```
+[ntfy] clodex: <no value> #<no value>: <no value>
+
+fork by nguyepham: https://github.com/nguyepham/clodex
+```
+
+The **title** is the ntfy server's, and nothing here can change it. The **head
+line** is this plugin's, and since 1.7.0 it does not print the placeholders back.
+A title that is nothing but `<no value>` and punctuation is treated as absent and
+the body's first line is read instead, giving `[ntfy] clodex: forked by
+nguyepham`. The body is delivered unchanged underneath it either way.
+
+The test is deliberately narrow: it fires only when the title carries **no other
+words**. A real title that happens to contain the string keeps its own text,
+because a partly-filled title still says more than a body line does. A degenerate
+title whose body is not recognised reads `(no subject)` rather than the
+placeholders.
+
+Recognising the body is also how the plugin knows an event's **kind**. It is not
+read from the tags — the github template sets one tag, `octocat`, on every event
+it renders, so tags cannot tell a fork from an issue comment. The body's first
+line can, and it is the same line the author mute already reads. Anything not
+positively identified is `other`, which is every issue, PR and comment, and every
+event this plugin cannot name.
+
+### Inbox only (not the seat)
+
+A fork or a star is news for the **operator** and noise to an **agent**: it
+carries nothing to act on, and it lands in a lead's input as a peer message that
+costs a turn to read and discard. So `fork, star, watch` ship in the
+**Inbox only** field by default — those events raise an inbox note as always and
+are not injected into the topic's seat. Issues, PRs and comments still reach the
+seat, because those can carry work.
+
+Empty the field to send everything to the seat again. Only a kind the plugin
+positively identified can be listed; `other` is never matched, so an unrecognised
+event is never silently withheld from a seat.
+
+This is **not** a drop. The message is delivered in full to the operator, so it
+does not touch the seat's rate budget, the duplicate window or the cursor — all
+of which a real drop does touch.
 
 ## What reaches a seat, and what it costs
 

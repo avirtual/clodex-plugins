@@ -1,12 +1,12 @@
 {
   "id": "ntfy",
   "name": "ntfy",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "hostApi": "1",
   "entry": { "engine": "engine.js", "renderer": "renderer.js" },
   "style": "style.css",
   "enabledByDefault": false,
-  "announce": "Subscribes to ntfy topics (e.g. GitHub webhooks rendered by ntfy) on one server and raises each message as an operator inbox note and, optionally, a rate-limited one-line summary to a seat — a different seat per topic. Message text arrives fenced as untrusted; tag, title and author filters drop what you do not want to hear about, including an agent's own comments.",
+  "announce": "Subscribes to ntfy topics (e.g. GitHub webhooks rendered by ntfy) on one server and raises each message as an operator inbox note and, optionally, a rate-limited one-line summary to a seat — a different seat per topic. Message text arrives fenced as untrusted; tag, title and author filters drop what you do not want to hear about, including an agent's own comments. Events the github template cannot title (a fork, a star) are named from their body instead of printing <no value>, and go to your inbox without spending a seat.",
   "surfaces": {
     "settings.get": "any",
     "status.get": "any"

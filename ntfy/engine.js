@@ -356,6 +356,23 @@ function readSettings() {
     // case-insensitive: `avirtual` and `AVirtual` are one account, so treating
     // them as two would let the mute miss the very comments it was set for.
     muteAuthors: readList(s.muteAuthors).map((x) => x.replace(/^@/, '').toLowerCase()),
+    /*
+     * Which event kinds reach a SEAT. The inbox is unaffected: an operator who
+     * asked for a topic gets everything on it.
+     *
+     * A fork or a star is news for the operator and noise to an agent — it
+     * carries nothing to act on, and it lands in a lead's input as a peer
+     * message that costs a turn to read and discard. Issues, PRs and comments
+     * can carry work, so they keep going to the seat.
+     *
+     * A LIST rather than a boolean per kind, so an operator who wants forks in
+     * a seat again adds one word. The default holds the two kinds that are
+     * purely informational; every other kind, including every kind this plugin
+     * cannot name, is unaffected — see kindIsSeatMuted.
+     */
+    seatMuteKinds: (s.seatMuteKinds === undefined
+      ? ['fork', 'star', 'watch']
+      : readList(s.seatMuteKinds).map((x) => x.toLowerCase())),
   };
 }
 
@@ -521,8 +538,66 @@ function foldTitle(raw) {
   return String(raw == null ? '' : raw).replace(TITLE_BREAKS, ' ');
 }
 
+/*
+ * A title ntfy's own template failed to fill.
+ *
+ * `?template=github` renders one title for every event through a branch chain
+ * that assumes issue-shaped fields. An event with none of them — a fork is the
+ * one seen in the wild — renders each missing field as Go's `<no value>`, so the
+ * subject line arrives as `<no value> #<no value>: <no value>` with a perfectly
+ * good body underneath. The rendering happens on the ntfy SERVER; nothing here
+ * can change it, and the plugin sees only the result.
+ *
+ * What the plugin does own is the head line it composes. So a title that is
+ * nothing but `<no value>` and punctuation is treated as absent and the body's
+ * first line is used instead — which is where the template put the real
+ * information (`fork by nguyepham: https://...`).
+ *
+ * Deliberately narrow. It fires only when the title carries NO other words: a
+ * real title that happens to contain the string keeps its own text, because a
+ * partly-filled title still says more than a body line does.
+ */
+const NO_VALUE = /<no value>/g;
+
+function titleIsEmpty(title) {
+  return foldTitle(title).replace(NO_VALUE, '').replace(/[\s#:,;.\-–—/|]+/g, '') === '';
+}
+
+/*
+ * The subject line for an event, and the kind it was derived from.
+ *
+ * `kind` is what routing reads. It is NOT parsed out of the tags: the github
+ * template sets one tag, `octocat`, on every event it renders, so tags cannot
+ * tell a fork from an issue comment. The body's first line can — the template
+ * writes `fork by <login>: <url>` — and it is the same line authorOf() already
+ * relies on for muting.
+ *
+ * A kind is only claimed when the title was degenerate AND the body announced
+ * itself. Anything else is 'other', which routes exactly as every message did
+ * before this existed: an unknown event must never become a silently dropped
+ * one, so 'other' is the default in both directions.
+ */
+const BODY_KIND_RE = /^(fork|star|starred|watch)(?:ed)?\s+by\s+([A-Za-z0-9][A-Za-z0-9-]{0,38})\b/i;
+
+function subjectOf(ev) {
+  const title = foldTitle(ev.title);
+  if (!titleIsEmpty(title)) return { kind: 'other', text: title };
+  const first = foldTitle(String(ev.message == null ? '' : ev.message).split('\n').find((l) => l.trim()) || '');
+  const m = BODY_KIND_RE.exec(first.trim());
+  if (m) {
+    const verb = m[1].toLowerCase();
+    const kind = (verb === 'starred' ? 'star' : (verb === 'watched' ? 'watch' : verb));
+    const past = { fork: 'forked', star: 'starred', watch: 'watched' }[kind];
+    return { kind, text: `${past} by ${m[2]}` };
+  }
+  // Degenerate title, unrecognised body: say that rather than printing the
+  // placeholders back. The body is still delivered in full underneath.
+  return { kind: 'other', text: first ? first : '(no subject)' };
+}
+
 function noteText(ev, topic) {
-  const head = `[ntfy] ${topic}: ${clip(neuter(foldTitle(ev.title)), TITLE_MAX)}`.trimEnd();
+  const subject = subjectOf(ev).text;
+  const head = `[ntfy] ${topic}: ${clip(neuter(subject), TITLE_MAX)}`.trimEnd();
   return [head, '', UNTRUSTED_OPEN, clip(neuter(ev.message), MESSAGE_MAX), UNTRUSTED_END].join('\n');
 }
 
@@ -540,7 +615,7 @@ function noteText(ev, topic) {
  * return value, so the inbox route must have run — see route().
  */
 function seatText(ev, topic, noteId) {
-  const title = clipBytes(neuter(foldTitle(ev.title)), SEAT_TITLE_BYTES);
+  const title = clipBytes(neuter(subjectOf(ev).text), SEAT_TITLE_BYTES);
   const head = `[ntfy] ${topic}: ${title}`.trimEnd();
   const first = foldTitle(String(ev.message == null ? '' : ev.message).split('\n').find((l) => l.trim()) || '');
   const body = clipBytes(neuter(first), SEAT_LINE_BYTES);
@@ -716,6 +791,23 @@ function route(ev, row) {
   }
 
   if (!seat) return;
+
+  /*
+   * Kind routing, AFTER the inbox and before anything is spent on the seat.
+   *
+   * Placed here rather than in dropReason() because this is not a drop: the
+   * message is delivered, to the operator, in full. Only the seat copy is
+   * suppressed — so it must not touch the budget, the dedupe window or the
+   * cursor, all of which dropReason's callers do touch.
+   *
+   * Only a kind subjectOf() positively identified can be muted. 'other' is
+   * every issue, PR, comment and unknown event, and it is never matched here.
+   */
+  const kind = subjectOf(ev).kind;
+  if (kind !== 'other' && cfg.seatMuteKinds.includes(kind)) {
+    logInfo(`${kind} event ${ev.id} went to the inbox only; ${kind} is in the seat mute list`);
+    return;
+  }
 
   // Oversized messages are inbox-only regardless of budget: spending an
   // injection on one is worse than spending the budget on ten normal ones.

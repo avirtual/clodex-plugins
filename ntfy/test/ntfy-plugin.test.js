@@ -1688,3 +1688,154 @@ test('a message for a topic no row asked for is not routed anywhere', { skip: SK
     await srv.close();
   }
 });
+
+/*
+ * A github fork event, byte-for-byte as three of them arrived on the operator's
+ * own topic. The title is what ntfy's `?template=github` renders for an event
+ * that has none of the issue fields it interpolates; the body is fine.
+ *
+ * Both halves of the fix are asserted against the SAME event, because they are
+ * one story: the head line must not print the placeholders back, and the seat
+ * must not be spent on news that carries no work.
+ */
+const FORK = {
+  event: 'message',
+  topic: 'clodex',
+  tags: ['octocat'],
+  title: '<no value> #<no value>: <no value>',
+  message: 'fork by nguyepham: https://github.com/nguyepham/clodex',
+};
+
+test('a fork renders as a fork, and reaches the operator but not the seat', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'f1', ...FORK });
+    assert.ok(await until(() => h.notes.length === 1, 5000), 'the operator was told');
+    await settle(30);
+
+    const body = h.notes[0].body;
+    assert.ok(!/<no value>/.test(body), 'the placeholders are not printed back');
+    assert.ok(/^\[ntfy\] clodex: forked by nguyepham$/m.test(body),
+      `head line names the event and the actor, got: ${body.split('\n')[0]}`);
+    // The body is untouched: the fix is to the head line the plugin composes,
+    // not to the text it was given.
+    assert.ok(body.includes('fork by nguyepham: https://github.com/nguyepham/clodex'),
+      'the body still carries the link, in full');
+
+    assert.equal(h.injected.length, 0, 'and no seat was spent on it');
+    assert.ok(h.logged.some((l) => /fork event f1 went to the inbox only/.test(l)),
+      'the withheld injection is logged, so the plugin log stays a complete record');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('an issue still reaches the seat: the mute is per kind, not a blanket', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // The control that makes the test above mean something: same topic, same
+    // tag (the github template tags EVERY event `octocat`, which is why kind
+    // cannot be read from the tags), and it must still be injected.
+    srv.push({ id: 'i1', event: 'message', topic: 'clodex', tags: ['octocat'],
+      title: 'created #10: [Bug] Clipboard encoding',
+      message: 'Fudal: still broken\nhttps://github.com/avirtual/clodex/issues/10' });
+
+    assert.ok(await until(() => h.injected.length === 1, 5000), 'an issue reaches the seat');
+    assert.ok(/created #10/.test(h.injected[0].text), 'with its own title, unaltered');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('emptying the kind list sends forks to the seat again', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  // The operator's escape hatch: one field, no code change. Written as the
+  // empty string because that is what the dialog produces when the box is
+  // cleared — an operator clearing it must not fall back to the default.
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' }, seatMuteKinds: '' } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    srv.push({ id: 'f2', ...FORK });
+    assert.ok(await until(() => h.injected.length === 1, 5000), 'the fork was injected');
+    assert.ok(/forked by nguyepham/.test(h.injected[0].text),
+      'and the seat summary carries the recovered subject too, not the placeholders');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a real title is never overwritten, and an unknown body is not guessed at', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: '' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // A title that CONTAINS the string but says something too: a partly-filled
+    // title still carries more than a body line, so it keeps its own text.
+    srv.push({ id: 'k1', event: 'message', topic: 'clodex',
+      title: 'closed #<no value>: Clipboard encoding', message: 'https://x/1' });
+    // Degenerate title, body this plugin cannot classify. It must not invent a
+    // kind, and must not print the placeholders.
+    srv.push({ id: 'k2', event: 'message', topic: 'clodex',
+      title: '<no value> #<no value>: <no value>', message: 'something new from ntfy' });
+    // Degenerate title, no body at all.
+    srv.push({ id: 'k3', event: 'message', topic: 'clodex',
+      title: '<no value>', message: '' });
+
+    assert.ok(await until(() => h.notes.length === 3, 5000), 'all three were routed');
+    const head = (i) => h.notes[i].body.split('\n')[0];
+    assert.ok(/closed #<no value>: Clipboard encoding/.test(head(0)),
+      `a partly-filled title is kept verbatim, got: ${head(0)}`);
+    assert.equal(head(1), '[ntfy] clodex: something new from ntfy');
+    assert.equal(head(2), '[ntfy] clodex: (no subject)');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
+
+test('a withheld fork costs no budget, no dedupe slot and no cursor stall', { skip: SKIP }, async () => {
+  const srv = ntfyServer();
+  const url = await srv.listen();
+  const h = makeHost({ settings: { url, routes: { inbox: true, seat: 'seat' } } });
+  try {
+    h.engine.register('ntfy', loadEngine(), MANIFEST);
+    assert.ok(await until(() => srv.state.streams.length === 1));
+
+    // Withholding a SEAT copy is not a drop: the operator got the message in
+    // full. So it must not spend the seat's rate budget, and it must not stall
+    // the cursor — the two things a real drop deliberately does differently.
+    srv.push({ id: 'f3', ...FORK });
+    assert.ok(await until(() => h.notes.length === 1, 5000));
+    await settle(30);
+
+    srv.push({ id: 'i2', event: 'message', topic: 'clodex', title: 'created #11: work',
+      message: 'Fudal: a real ticket' });
+    assert.ok(await until(() => h.injected.length === 1, 5000),
+      'the issue after it is injected — the fork spent nothing');
+
+    const st = await h.engine.dispatch('ntfy', 'status.get', [], 'web');
+    assert.equal(st.lastId, 'i2', 'the cursor advanced past both');
+  } finally {
+    h.cleanup();
+    await srv.close();
+  }
+});
