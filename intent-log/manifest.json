@@ -1,7 +1,7 @@
 {
   "id": "intent-log",
   "name": "Intent Log",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "hostApi": "1",
   "scope": "session",
   "entry": {

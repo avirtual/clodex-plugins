@@ -2,6 +2,12 @@
  * stock-assessments. Plugin CSS is injected verbatim and unscoped, so every
  * selector here is an `sa-`-prefixed class this plugin puts on its own
  * elements — nothing that can match core's DOM or another plugin's.
+ *
+ * The modal's chrome uses the neutral overlay tokens core adopted in 5.72.0.
+ * This panel never had the red border, because it never copied the old core
+ * recipe — but it drew its own grey out of a literal rgba, which no theme can
+ * reach. `--accent` below is only ever a signal: the selected range tab, the
+ * 52-week marker, the chart cursor.
  */
 
 .sa-modal {
@@ -10,10 +16,11 @@
   width: min(1180px, 95vw);
   height: min(760px, 88vh);
   margin: 5vh auto 0;
-  background: var(--bg, #1e1e1e);
+  background: var(--surface-overlay, #1e1e1e);
   color: inherit;
-  border: 1px solid rgba(128, 128, 128, 0.35);
-  border-radius: 8px;
+  border: 1px solid var(--border-strong, rgba(128, 128, 128, 0.35));
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgba(0, 0, 0, 0.45));
   overflow: hidden;
 }
 
@@ -674,7 +681,9 @@
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--sidebar-bg, #151a24);
+  /* Sits ON the panel and hides the plot under it, so it takes the panel's
+     own background rather than a different surface token. */
+  background: var(--surface-overlay, #151a24);
   border: 1px solid var(--border, #2a3142);
   opacity: 0;
   transition: opacity 90ms ease;

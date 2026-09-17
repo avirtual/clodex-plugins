@@ -14,6 +14,15 @@
  * `.plugin-overlay` itself is never styled here: the host creates, toggles and
  * removes it, so it is host contract rather than plugin skin. The host paints
  * only a scrim; `.cr-modal` below is the panel.
+ *
+ * The panel's own chrome — background, border, shadow — uses the neutral
+ * overlay tokens core adopted in 5.72.0, so this surface sits next to a core
+ * popover rather than shouting at it. `--accent` is the brand colour and stays
+ * a SIGNAL here: a selected ticker, an active chip, a quote's left edge. The
+ * fallbacks are not decoration — on a host older than 5.72.0 these tokens do
+ * not exist, and a var() that resolves to nothing makes its whole declaration
+ * invalid at computed-value time: the panel would lose its border and its
+ * background entirely rather than fall back to something close.
  */
 
 .cr-modal {
@@ -24,11 +33,11 @@
   flex-direction: column;
   padding: 12px 14px;
   box-sizing: border-box;
-  background: var(--sidebar-bg, #16213e);
+  background: var(--surface-overlay, #24243c);
   color: var(--text, #eee);
-  border: 1px solid var(--accent, #e94560);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.14));
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgba(0, 0, 0, 0.45));
   overflow: hidden;
   font-size: 13px;
 }
@@ -496,13 +505,16 @@
   vector-effect: non-scaling-stroke;
 }
 
-/* Labels are HTML over the plot, never text inside the stretched SVG. */
+/* Labels are HTML over the plot, never text inside the stretched SVG.
+   The background is here to OCCLUDE the line running under the text, so it
+   has to be the panel's own colour — `.cr-modal`'s, not `--sidebar-bg`, which
+   is a different surface token and would read as a smudge on the chart. */
 .cr-chart-hi, .cr-chart-lo {
   position: absolute;
   right: 2px;
   font-size: 10px;
   color: var(--text-dim, #949eb1);
-  background: var(--sidebar-bg, #16213e);
+  background: var(--surface-overlay, #24243c);
   padding: 0 3px;
   pointer-events: none;
 }

@@ -8,7 +8,16 @@
 
    Colours come from core's theme variables (declared on :root) rather than
    fixed hex, so this surface follows the user's theme — there are light themes
-   as well as dark ones, and hardcoded colours are unreadable in half of them. */
+   as well as dark ones, and hardcoded colours are unreadable in half of them.
+
+   The panel's chrome uses the neutral overlay tokens core adopted in 5.72.0,
+   so it matches a core popover instead of drawing a brand-red edge next to
+   one. `--accent` stays a SIGNAL below (a hovered button, the `task` verb).
+   Every one keeps its fallback: on a pre-5.72.0 host these tokens do not
+   exist, and a var() that resolves to nothing makes the whole declaration
+   invalid at computed-value time — the panel would go transparent and its
+   contents would float on the scrim, which is the exact failure this block
+   exists to prevent. */
 
 .ilog {
   width: 100%;
@@ -22,11 +31,11 @@
   gap: 8px;
   padding: 14px 16px;
   box-sizing: border-box;
-  background: var(--sidebar-bg, #16213e);
+  background: var(--surface-overlay, #24243c);
   color: var(--text, #eee);
-  border: 1px solid var(--accent, #e94560);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.14));
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgba(0, 0, 0, 0.45));
   overflow: hidden;
 }
 

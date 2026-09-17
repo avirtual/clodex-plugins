@@ -263,6 +263,8 @@ of use instead, so a host missing them loses one button rather than the viewer.
 - `style.css` — all selectors `sa-`-prefixed; plugin CSS is injected unscoped.
   The quote header uses only theme variables (`--ok`/`--error` for direction,
   `--accent` for the range marker), so it stays readable on the light themes.
+  The modal itself uses core's overlay tokens (`--surface-overlay`,
+  `--border-strong`, `--shadow-overlay`), adopted in 5.72.0.
 - `skills/`, `agents/` — content, not code. Undeclared in the manifest: the
   loader reads the directories. Verify with
   `node ~/projects/clodex/plugins/tools/verify.js <this dir>`, which prints the

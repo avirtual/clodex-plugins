@@ -317,7 +317,9 @@ three capability grants — it never reads turn text, thinking, or tool inputs.
   independently, so a dead Fear & Greed still shows the majors and vice versa.
 - `style.css` — all selectors `cr-`-prefixed, since plugin CSS is injected
   unscoped into every window, and every colour is a theme variable. Clodex ships
-  light themes as well as dark ones.
+  light themes as well as dark ones. The modal's chrome uses core's overlay
+  tokens (`--surface-overlay`, `--border-strong`, `--shadow-overlay`), adopted
+  in 5.72.0, so it matches a core popover; `--accent` is kept for state only.
 
 ### There is no sandbox
 

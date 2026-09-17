@@ -280,12 +280,29 @@ a panel:
   width: 100%; max-width: 1100px; height: 82vh;
   display: flex; flex-direction: column;
   padding: 14px 16px; box-sizing: border-box;
-  background: var(--sidebar-bg); color: var(--text);
-  border: 1px solid var(--accent); border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  background: var(--surface-overlay, #24243c); color: var(--text, #eee);
+  border: 1px solid var(--border-strong, rgba(255, 255, 255, 0.14));
+  border-radius: var(--radius-lg, 8px);
+  box-shadow: var(--shadow-overlay, 0 8px 24px rgba(0, 0, 0, 0.45));
   overflow: hidden;
 }
 ```
+
+Those four are the **overlay chrome tokens**, and core moved its own popovers,
+dialogs and modals onto them in **5.72.0**. Use them for every floating surface
+you draw. An older recipe you may still see in the wild — `--sidebar-bg` with a
+`1px solid var(--accent)` border and a literal shadow — now renders your panel
+with a brand-red edge beside core's neutral chrome, because `--accent` is the
+red/orange brand colour. Core's shared rule cannot fix this for you: it is
+scoped to core's own ids, so it never reaches a plugin's selectors.
+
+**Keep the fallbacks.** On a host older than 5.72.0 those tokens do not exist,
+and a `var()` that resolves to nothing invalidates its whole declaration at
+computed-value time — the panel loses its background entirely rather than
+falling back to a near-enough colour, which is failure 1 above.
+
+Reserve `--accent` for **state**: an active tab, a selected row's left edge, a
+focus ring, a primary button. It is a signal, not a frame.
 
 Do **not** restyle `.plugin-overlay` itself: the host creates, toggles and
 removes it, so it is host contract rather than plugin skin.
@@ -300,13 +317,22 @@ Core declares these on `:root`, and a plugin stylesheet inherits them:
 | Variable | Use for |
 |---|---|
 | `--bg` | the window background; inputs and buttons |
-| `--sidebar-bg` | a panel or card sitting above the background |
+| `--surface-overlay` | a floating surface: your overlay panel, a popover, a menu |
+| `--sidebar-bg` | a panel or card sitting *in* the window, not over it |
 | `--sidebar-hover` | hover states |
 | `--text` | body text |
 | `--text-dim` | secondary text, timestamps, labels |
-| `--accent` | your panel border, selection, emphasis |
 | `--border` | rules, separators, input borders |
+| `--border-strong` | the edge of a floating surface |
+| `--shadow-overlay` | the shadow under one |
+| `--radius-lg` | its corner radius |
+| `--accent` | selection, emphasis, focus — **state, not chrome** |
 | `--warn`, `--error`, `--ok` | semantic states, contrast-corrected per theme |
+
+One consequence worth knowing: if a label inside your panel paints a background
+to **occlude** something behind it — a chart line under a price label — that
+background must be the panel's own `--surface-overlay`, not `--sidebar-bg`.
+They are different colours, and the mismatch reads as a smudge.
 
 Write `var(--text-dim, #949eb1)` — the fallback keeps the stylesheet sane if it
 is ever read outside the app. Ask the scout to read the current variable list out
