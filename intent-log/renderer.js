@@ -117,7 +117,10 @@ module.exports.activate = (rhost) => {
       const pause = el('button', 'ilog-btn', 'Pause');
       const clear = el('button', 'ilog-btn', 'Clear');
       const count = el('span', 'ilog-count', '');
-      bar.append(verb, session, pause, clear, count);
+      const close = el('button', 'ilog-close', '×');
+      close.title = 'Close';
+      close.addEventListener('click', () => surface.close());
+      bar.append(verb, session, pause, clear, count, close);
 
       const head = el('div', 'ilog-head');
       head.append(el('span', 'ilog-at', 'time'), el('span', 'ilog-agent', 'agent'),

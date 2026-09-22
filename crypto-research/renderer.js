@@ -374,6 +374,10 @@ module.exports.activate = (rhost) => {
     topbar.appendChild(rootLabel);
     const folderBtn = el('button', 'cr-btn', 'Folder…');
     topbar.appendChild(folderBtn);
+    const closeBtn = el('button', 'cr-close', '×');
+    closeBtn.title = 'Close';
+    closeBtn.addEventListener('click', () => surface.close());
+    topbar.appendChild(closeBtn);
     modal.appendChild(topbar);
 
     // The market strip: what is true of the market as a whole, above a library
