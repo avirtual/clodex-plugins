@@ -1,0 +1,17 @@
+{
+  "id": "spill-browser",
+  "name": "Spill Browser",
+  "version": "0.1.0",
+  "hostApi": "1",
+  "entry": {
+    "engine": "engine.js",
+    "renderer": "renderer.js"
+  },
+  "style": "style.css",
+  "surfaces": {
+    "list": "any",
+    "read": "any"
+  },
+  "enabledByDefault": false,
+  "announce": "Browse the long intent and prose bodies Clodex filed out of seats' transcripts — newest first, filtered by kind and agent, rendered as markdown. Read-only."
+}
