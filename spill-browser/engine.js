@@ -10,7 +10,8 @@
 //                                        metadata {ts, agent, verb, id, bytes, head}.
 //                                        Append-only and never pruned, so it is
 //                                        read incrementally by byte offset.
-// A file with no index row still lists, dated by mtime, as kind `unknown`.
+// A file with no index row still lists, dated by mtime, as kind `unknown` (or
+// `scratch` when its first line says it is a scratch episode result).
 //
 // An index row whose file is gone — core removes a seat's spill dir with the
 // seat, and the ticket loop retires every hand on accept — is recovered from
@@ -166,6 +167,11 @@ module.exports.activate = (host) => {
 
   const kindOf = (verb) => verb.split(' ')[0];
 
+  // Core files a scratch episode's result with no wire-spill row, but its
+  // first line names it, so it lists as `scratch` rather than `unknown`.
+  const SCRATCH_RE = /^Scratch episode result\b/;
+  const verbFromBody = (first) => (SCRATCH_RE.test(first) ? 'scratch' : 'unknown');
+
   // Core's spill id: sha256 of the body as written, first 16 hex.
   const idOf = (s) => crypto.createHash('sha256').update(Buffer.from(s, 'utf8')).digest('hex').slice(0, 16);
 
@@ -226,7 +232,8 @@ module.exports.activate = (host) => {
       if (!meta) {
         let st;
         try { st = fs.statSync(file); } catch { continue; }
-        meta = { ts: st.mtimeMs, agent: f.agent, id: f.id, verb: 'unknown', bytes: st.size, head: null };
+        const first = firstLine(key, file);
+        meta = { ts: st.mtimeMs, agent: f.agent, id: f.id, verb: verbFromBody(first), bytes: st.size, head: null };
       }
       out.push({ ...meta, kind: kindOf(meta.verb), first: firstLine(key, file) });
     }

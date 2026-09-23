@@ -35,7 +35,10 @@ No capability grant is needed: it reads files, not agents' turns.
 Two mismatches you will see:
 
 - **A file with no index row** lists as kind `unknown`, dated by the file's
-  mtime. Spills from before the index carried them are like this.
+  mtime. Spills from before the index carried them are like this. The
+  exception is a scratch episode's result: core files it with no index row,
+  but its first line (`Scratch episode result …`) names it, so it lists as
+  kind `scratch`.
 - **An index row with no file.** Core deletes a seat's spill folder with the
   seat, and the ticket loop retires every hand when its ticket is accepted — so
   most `task done` files are gone. `task` bodies also live in the ticket boards
