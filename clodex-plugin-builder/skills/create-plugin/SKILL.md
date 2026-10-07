@@ -60,7 +60,7 @@ send the scout to the section:
 | Any UI at all — seven slots, one subsection each | §6 |
 | A button plus an overlay plus reading files | §6.3, §6.7, §8 |
 | An `[agent:…]` verb | §7, then `host.intents` in §4 |
-| An MCP tool a subagent can call | §7, "Declaring an MCP tool for subagents" |
+| An MCP tool a subagent can call | §7, "Declaring an MCP tool for subagents" and "Reply timing and status" |
 | Talking between your halves | §8 (`invoke`) |
 | Engine → renderer events | §9 |
 | Enable, disable, failure, quarantine | §10 |
@@ -394,10 +394,21 @@ these are the rules a first tool gets wrong:
   plugin is ticked AND the verb is enabled. Anywhere else a call answers
   `unknown tool`, the same text as for a tool that does not exist. The README
   note that a verb is off until ticked therefore covers the tool too. Say so.
-- **The reply is your handler's `handle.inject`.** Text injected while the call
-  is open becomes the tool result. Text injected after the call's deadline
-  (30 s by default in 5.115.0) arrives in the seat's main conversation. For a
-  slow verb, reply once, promptly, with the result or a "started" line.
+- **The reply is your handler's `handle.inject`.** The first line injected
+  while the call is open becomes the tool result. If none comes before the
+  deadline, the caller gets `<verb> accepted; its reply will arrive in the
+  seat's main conversation`, and that is where your late line goes. The
+  deadline is 30 s unless the row sets **`replyWaitMs(intent)`**. That
+  returns milliseconds per intent, capped at 470 s, so a slow sub-verb can
+  wait for its own result. Set it whenever a verb can take longer than 30 s,
+  or the subagent that called it never sees the result.
+- **Set `classifyReply(line)` if your verb refuses in its own words.** It
+  sees the first reply line and returns `'refused'`, `'error'` or anything else
+  (meaning ok). By default only a thrown handler (`[agent:<verb>] error: …`)
+  counts as a failure, so a polite refusal reads as ok. The status sets the
+  `clodex-send` exit code, the `mcp.log` status, and the server's
+  stop-after-3-identical-failures guard. Without it, an agent repeating a call
+  your verb refuses is never stopped.
 - **`logKeys`** (up to 4 argument names) picks which arguments
   `run/<seat>/mcp.log` records. List only short, non-secret ones, such as a
   sub-verb or a target name, and never a body.
