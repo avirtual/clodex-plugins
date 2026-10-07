@@ -22,7 +22,8 @@ authority. Read `plugin-sources.md` only for install, precedence and shadowing
 questions.
 
 **A checkout also carries `plugins/tools/` and the core plugins themselves**
-(`git-branches`, `workbench`, `github`, `memory-viewer`, `tickets-viewer`).
+(`git-branches`, `workbench`, `github`, `memory-viewer`, `tickets-viewer`,
+and `browser-pane`, the reference for an MCP tool: `mcp-tool.js`, `subagent.js`).
 Reading a core plugin is often the fastest way to answer "how is this actually
 used" — cite it as an example rather than as the rule.
 

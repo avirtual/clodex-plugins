@@ -26,6 +26,7 @@ The contract is thorough and long, and most of what makes a first plugin fail is
 a handful of rules scattered through it: the folder must be named for the id,
 `hostApi` is a string, `style.css` is injected unscoped into every window,
 `events.emit` needs an explicit scope, a verb is off until the operator ticks it,
+an MCP tool for subagents is a second face of a verb (not a surface of its own),
 a content-only plugin needs no JavaScript at all. The skill front-loads exactly
 those and delegates the rest, so a first plugin is an implementation task rather
 than a reading task.
@@ -59,7 +60,7 @@ Otherwise, **Plugins ▸ Manage Plugins… ▸ Install from GitHub…**:
 ```
 https://github.com/avirtual/clodex-plugins/tree/master/clodex-plugin-builder
 avirtual/clodex-plugins:clodex-plugin-builder                                # follows the branch
-avirtual/clodex-plugins@clodex-plugin-builder-v0.2.2:clodex-plugin-builder   # frozen
+avirtual/clodex-plugins@clodex-plugin-builder-v0.3.0:clodex-plugin-builder   # frozen
 ```
 
 `@` picks the ref and `:` picks the subfolder; the subpath is required, since

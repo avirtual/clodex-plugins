@@ -60,6 +60,7 @@ send the scout to the section:
 | Any UI at all — seven slots, one subsection each | §6 |
 | A button plus an overlay plus reading files | §6.3, §6.7, §8 |
 | An `[agent:…]` verb | §7, then `host.intents` in §4 |
+| An MCP tool a subagent can call | §7, "Declaring an MCP tool for subagents" |
 | Talking between your halves | §8 (`invoke`) |
 | Engine → renderer events | §9 |
 | Enable, disable, failure, quarantine | §10 |
@@ -69,8 +70,10 @@ send the scout to the section:
 Three shipped plugins are better than any summary, and a checkout has them:
 **git-branches** (row badge + settings panel + a verb), **memory-viewer**
 (footer button + overlay + `invoke` for filesystem work — the commonest shape)
-and **workbench** (a full overlay application). Read the one whose shape matches
-what you are building.
+and **workbench** (a full overlay application). For an MCP tool, read
+**browser-pane**'s `mcp-tool.js` and `subagent.js`: the one shipped tool, with
+its argument validation and its subagent policy. Read the one whose shape
+matches what you are building.
 
 ## Step 1 — decide the shape
 
@@ -79,7 +82,9 @@ Ask, if the user has not said:
 - **What should it DO** for the operator or for agents?
 - **Where should it appear** — a sidebar button, a status-bar readout, a badge
   on session rows, a full overlay, a settings panel?
-- **Does an agent need to reach it** — an `[agent:…]` verb?
+- **Does an agent need to reach it** — an `[agent:…]` verb? **And a
+  subagent?** A subagent cannot emit intents; it reaches a verb only as an MCP
+  tool the verb declares (Step 5a).
 - **Does it need code at all?**
 
 That last one first, because it changes everything. **Three complete shapes**,
@@ -356,6 +361,51 @@ the README.
 Verbs are one flat global namespace across all installed plugins. The second
 plugin to claim one is refused at activation. Pick `myplugin-run`, never `run`.
 
+## Step 5a — an MCP tool, if a subagent needs the verb
+
+Every Claude seat runs a `clodex-mcp` server, and a plugin can put tools in it.
+A tool is not a separate surface: it is **another way to emit your own verb**,
+declared on the same `host.intents.register` row with two fields, `tools` and
+`subagent`. No verb, no tool. Read the contract section before writing one;
+these are the rules a first tool gets wrong:
+
+- **`tools` without `subagent` is a registration error**, and so is a tool name
+  another plugin holds (`ETOOLTAKEN`). Tool names are one global namespace like
+  verbs, so the same naming advice applies.
+- **`toIntent(args)` returns exactly one line of YOUR verb** (`[agent:<verb> …]`
+  then `[agent:end]`). Anything else is refused as a foreign intent. Throw an
+  `Error` to reject the arguments; the caller sees `invalid: <message>`.
+  **Validate every argument before you render it**: refuse unknown keys,
+  newlines, `[` / `]` inside a bracket token, and a body that starts with
+  `[agent:`. The tool's arguments come from a model, so a newline that would let
+  them become a second intent line should be refused before the host sees it.
+- **`subagent.refuse(intent)` is default-deny.** Return `null` to allow, a
+  string to refuse with that text, or `''` for "not mine". Hold back anything a
+  subagent should not do without the main agent: destructive or confirming
+  forms, closing what it did not open. In 5.115.0 every call to a plugin tool,
+  the main agent's included, passes through `refuse`, so do not build on a
+  main-agent-only tool form.
+- **`subagent.brief`** is one sentence the subagent reads when it starts. Name
+  the tool and its arguments.
+- **The grant is the verb's grant.** The tool is listed only on seats where the
+  plugin is ticked AND the verb is enabled. Anywhere else a call answers
+  `unknown tool`, the same text as for a tool that does not exist. The README
+  note that a verb is off until ticked therefore covers the tool too. Say so.
+- **The reply is your handler's `handle.inject`.** Text injected while the call
+  is open becomes the tool result. Text injected after the call's deadline
+  (30 s by default in 5.115.0) arrives in the seat's main conversation. For a
+  slow verb, reply once, promptly, with the result or a "started" line.
+- **`logKeys`** (up to 4 argument names) picks which arguments
+  `run/<seat>/mcp.log` records. List only short, non-secret ones, such as a
+  sub-verb or a target name, and never a body.
+- **A seat that brings its own `--mcp-config` or `--strict-mcp-config` gets no
+  clodex server**, so the tool is absent there. That is the operator's choice,
+  not a bug in your plugin.
+
+`verify.js` loads the row, so a malformed `tools` entry fails there. It does not
+call your tool. Exercise `toIntent` and `refuse` directly, with good and bad
+arguments, before you hand over.
+
 ## Step 6 — verify, then hand over
 
 Run `verify.js` if you found it. Fix everything it reports; it exercises the
@@ -363,7 +413,8 @@ real loader, including that `deactivate` releases what `activate` took.
 
 Then write the plugin's `README.md` — required sections: what it does, the seat
 it expects, what it writes and where. Plus, when they apply: that a verb is off
-until ticked, that a capability grant is off until granted, and which methods
+until ticked (and its MCP tool with it, plus what `refuse` keeps from
+subagents), that a capability grant is off until granted, and which methods
 are desktop-only (so the browser's refusal reads as a decision, not a bug).
 
 Finally tell the user how to install it:
