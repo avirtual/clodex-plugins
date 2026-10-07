@@ -375,10 +375,13 @@ these are the rules a first tool gets wrong:
 - **`toIntent(args)` returns exactly one line of YOUR verb** (`[agent:<verb> …]`
   then `[agent:end]`). Anything else is refused as a foreign intent. Throw an
   `Error` to reject the arguments; the caller sees `invalid: <message>`.
-  **Validate every argument before you render it**: refuse unknown keys,
-  newlines, `[` / `]` inside a bracket token, and a body that starts with
-  `[agent:`. The tool's arguments come from a model, so a newline that would let
-  them become a second intent line should be refused before the host sees it.
+  **The host does not check arguments against your `inputSchema`.** The schema
+  only describes the tool to the model; `toIntent` gets the raw arguments. So
+  validate every one before you render it: refuse unknown keys, newlines, `[` /
+  `]` inside a bracket token, and a body that starts with `[agent:`. The host
+  re-parses what you return and refuses anything but one intent of your verb,
+  so validation is not the security boundary. It is what turns a bad call into
+  an `invalid:` the model can fix, instead of `emitted a foreign intent`.
 - **`subagent.refuse(intent)` is default-deny.** Return `null` to allow, a
   string to refuse with that text, or `''` for "not mine". Hold back anything a
   subagent should not do without the main agent: destructive or confirming
