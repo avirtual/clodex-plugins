@@ -81,9 +81,12 @@ market-wide, not a property of the token, and lives once in the strip above.
 It is deliberately **today's** number sitting beside a **dated** assessment.
 Those are different moments, and the header says so and stamps its own.
 
-Two keyless public sources, both read-only, no account and no key:
+Three keyless public sources, all read-only, no account and no key:
 
-- **CoinGecko** — search, `/coins/markets`, `/market_chart`.
+- **CoinGecko** — search and `/coins/markets` (price, caps, supply, ATH).
+- **DefiLlama** — `coins.llama.fi/chart`, the daily series behind the chart,
+  keyed on the same CoinGecko id. CoinGecko's `/market_chart` is the fallback
+  for an id DefiLlama does not price.
 - **alternative.me** — the Fear & Greed index, as market context.
 
 ### An id is not a ticker, and the UI says which one it has
@@ -123,7 +126,14 @@ reach one coin by different routes, and caching it would let a run's confident
 id suppress another ticker's `id guessed` warning.
 
 CoinGecko's free tier throttles hard; a 429 is reported as a rate limit in
-words, not as missing data.
+words, not as missing data. That throttle is why the chart moved to DefiLlama:
+the price, chart and Fear & Greed calls fire together, and CoinGecko refused
+five of six parallel requests where DefiLlama answered all six.
+
+A chart that cannot be fetched says so and names who refused: a 429, a refused
+or dropped connection, no DNS answer, or a timeout, each in its own words. It
+is never drawn as an empty series, and a quote whose chart failed is not cached,
+so the next click on a range retries.
 
 ## The `[agent:cryptowatch]` verb
 

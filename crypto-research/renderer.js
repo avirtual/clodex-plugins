@@ -237,10 +237,19 @@ function renderMarkdown(md) {
  * inside the SVG can carry text or a stroke that must keep its proportions.
  * Labels are HTML positioned over the plot; the stroke uses non-scaling-stroke.
  */
-function drawChart(box, series) {
+function drawChart(box, series, why) {
   box.innerHTML = '';
   if (!Array.isArray(series) || series.length < 2) {
-    box.appendChild(el('div', 'cr-chart-empty', 'no price series'));
+    // A refused chart says who refused; only a series that is really empty
+    // reads as empty.
+    if (why) {
+      const f = el('div', 'cr-chart-empty');
+      f.appendChild(el('span', 'cr-chip cr-chip-err', 'no chart'));
+      f.appendChild(el('span', 'cr-quote-why', ` ${why}`));
+      box.appendChild(f);
+    } else {
+      box.appendChild(el('div', 'cr-chart-empty', 'no price series'));
+    }
     return;
   }
 
@@ -570,7 +579,7 @@ module.exports.activate = (rhost) => {
 
       const chartBox = el('div', 'cr-chart');
       box.appendChild(chartBox);
-      drawChart(chartBox, res.chart);
+      drawChart(chartBox, res.chart, res.chartError);
     }
 
     /* -------------------------------------------------------------- doc --- */

@@ -9,7 +9,9 @@
  *
  *   CoinGecko /search        name or symbol -> the canonical coin id
  *   CoinGecko /coins/markets price, caps, supply, ATH, 24h/7d/30d change
- *   CoinGecko /market_chart  the daily series behind the sparkline
+ *   DefiLlama /chart         the daily series behind the sparkline, keyed on
+ *                            the same CoinGecko id (CoinGecko /market_chart
+ *                            is the fallback for an id DefiLlama does not price)
  *   alternative.me /fng      Fear & Greed, as market context
  *
  * THE FAILURE MODE THAT SHAPED THIS FILE. `/coins/markets` answers **200 with
@@ -30,7 +32,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const CG = 'https://api.coingecko.com/api/v3';
+const LLAMA = 'https://coins.llama.fi';
 const FNG = 'https://api.alternative.me/fng';
+
+const SOURCE_NAMES = Object.freeze({
+  'api.coingecko.com': 'CoinGecko',
+  'coins.llama.fi': 'DefiLlama',
+  'api.alternative.me': 'alternative.me',
+});
 
 // A quote is a "quick look" number. It may be a minute stale; it must never be
 // a day stale, which would silently turn a live header into a yesterday header.
@@ -111,20 +120,44 @@ function diskWrite(dataDir, kind, key, value) {
 
 /* --------------------------------------------------------------- fetching --- */
 
+function sourceOf(url) {
+  try {
+    const host = new URL(url).hostname;
+    return SOURCE_NAMES[host] || host;
+  } catch { return 'the source'; }
+}
+
+// A throttle, a refused connection, no network and a timeout each have a
+// different remedy, so each reaches the UI in its own words rather than as
+// fetch's bare "fetch failed".
+function fetchFailure(e, src) {
+  if (e && e.name === 'AbortError') return new Error(`${src} did not answer within ${FETCH_TIMEOUT_MS / 1000}s`);
+  const code = e && e.cause && e.cause.code;
+  if (code === 'ECONNREFUSED') return new Error(`${src} refused the connection`);
+  if (code === 'ECONNRESET') return new Error(`${src} dropped the connection`);
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return new Error(`could not reach ${src}: no DNS answer (offline?)`);
+  if (code) return new Error(`could not reach ${src}: ${code}`);
+  return e;
+}
+
 async function getJson(url) {
   const prior = inflight.get(url);
   if (prior) return prior;
 
+  const src = sourceOf(url);
   const run = (async () => {
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(url, {
-        signal: ctl.signal,
-        headers: { accept: 'application/json', 'user-agent': 'clodex-crypto-research/0.1' },
-      });
-      if (res.status === 429) throw new Error('rate limited by CoinGecko (free tier); try again shortly');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      let res;
+      try {
+        res = await fetch(url, {
+          signal: ctl.signal,
+          headers: { accept: 'application/json', 'user-agent': 'clodex-crypto-research/0.1' },
+        });
+      } catch (e) { throw fetchFailure(e, src); }
+      if (res.status === 429) throw new Error(`rate limited by ${src} (free tier); try again shortly`);
+      if (!res.ok) throw new Error(`${src} answered HTTP ${res.status}`);
 
       // Read with a cap rather than res.json(), so an unbounded body cannot be
       // buffered whole before we discover its size.
@@ -238,15 +271,55 @@ async function fetchQuote(id) {
   return mapCoin(c);
 }
 
-async function fetchChart(id, range) {
-  const spec = RANGES[range] || RANGES['30d'];
+async function fetchLlamaChart(id, days) {
+  const key = `coingecko:${id}`;
+  const data = await getJson(`${LLAMA}/chart/${encodeURIComponent(key)}?span=${days + 1}&period=1d`);
+  // The same 200-with-the-row-missing shape as /coins/markets: an id DefiLlama
+  // does not price comes back as an empty `coins` object, not as an error.
+  const row = data && data.coins && data.coins[key];
+  if (!row || !Array.isArray(row.prices)) throw new Error(`DefiLlama has no price series for ${id}`);
+  return row.prices
+    .filter((p) => p && typeof p.timestamp === 'number' && typeof p.price === 'number')
+    .map((p) => ({ t: p.timestamp * 1000, v: p.price }));
+}
+
+async function fetchGeckoChart(id, days) {
   const url = `${CG}/coins/${encodeURIComponent(id)}/market_chart`
-    + `?vs_currency=usd&days=${spec.days}&interval=daily`;
+    + `?vs_currency=usd&days=${days}&interval=daily`;
   const data = await getJson(url);
   const prices = (data && Array.isArray(data.prices)) ? data.prices : [];
   return prices
     .filter((p) => Array.isArray(p) && typeof p[0] === 'number' && typeof p[1] === 'number')
     .map((p) => ({ t: p[0], v: p[1] }));
+}
+
+/**
+ * The daily series, DefiLlama first. The quote fires its price, chart and
+ * Fear & Greed calls together, and CoinGecko's free tier refuses bursts: six
+ * parallel requests measured one answered there and six of six at DefiLlama.
+ * DefiLlama keys on the same CoinGecko id, so it adds no second identity guess.
+ *
+ * Throws rather than returning [] — a refused chart must reach the UI as a
+ * reason, not as an empty series. Only a real series is memoised.
+ */
+async function fetchChart(id, range) {
+  const spec = RANGES[range] || RANGES['30d'];
+  const memKey = `c:${id}:${spec.days}`;
+  const hit = memGet(memKey, CHART_TTL_MS);
+  if (hit) return hit;
+
+  let series;
+  try {
+    series = await fetchLlamaChart(id, spec.days);
+  } catch (e1) {
+    try {
+      series = await fetchGeckoChart(id, spec.days);
+    } catch (e2) {
+      throw new Error(`${e1.message}; ${e2.message}`);
+    }
+  }
+  if (series.length < 2) throw new Error(`no price series for ${id} over ${spec.days} days`);
+  return memSet(memKey, series);
 }
 
 async function fetchFng() {
@@ -316,14 +389,22 @@ async function quote(opts) {
 
   try {
     // Fear & Greed is market-wide context; its failure must not fail the quote.
-    const [q, chart, fng] = await Promise.all([
+    // Nor must the chart's, but its reason is kept: a refused chart drawn as
+    // an empty one is the refusing-looks-empty failure this file is built against.
+    const [q, chartR, fng] = await Promise.all([
       fetchQuote(ident.id),
-      fetchChart(ident.id, rangeKey).catch(() => []),
+      fetchChart(ident.id, rangeKey).then((c) => ({ chart: c }), (e) => ({ chart: [], chartError: e.message })),
       fetchFng().catch(() => null),
     ]);
-    const payload = { state: 'live', quote: q, chart, range: rangeKey, fng };
-    memSet(memKey, payload);
-    if (dataDir) diskWrite(dataDir, 'q', `${ident.id}-${rangeKey}`, payload);
+    const payload = { state: 'live', quote: q, chart: chartR.chart, range: rangeKey, fng };
+    if (chartR.chartError) {
+      // Not cached: the next click on a range must retry, not be served the
+      // blank for the life of the quote memo.
+      payload.chartError = chartR.chartError;
+    } else {
+      memSet(memKey, payload);
+      if (dataDir) diskWrite(dataDir, 'q', `${ident.id}-${rangeKey}`, payload);
+    }
     return { ...payload, ident: { ...identOut, symbol: identOut.symbol || q.symbol, name: identOut.name || q.name } };
   } catch (e) {
     // Past-TTL disk copy, on purpose. Labelled stale so the UI can say so.
